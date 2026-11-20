@@ -22,6 +22,8 @@
 - Markdown 解析、代码高亮、KaTeX 移入 Web Worker：主包 1.02MB → 554KB，
   主线程只做 DOMPurify；Worker 启动失败会自动回退主线程
 - 读模式不加载 CodeMirror，主包 554KB → 294KB；第一次切到分栏 / 编辑时才按需加载编辑器
+- 预览改为 morphdom 增量修补：编辑时不再整块 innerHTML 重建、不再闪 fade，
+  滚动位置、已渲染图表和已加载图片都会保留
 - 启动时先画静态启动壳，WebView2 冷启动期间不再白屏
 - 状态栏切换换行符（CRLF / LF / CR）与编码（UTF-8 / UTF-8 BOM / GBK / UTF-16 LE/BE）；
   切换后立即落盘，转换失败会回滚并提示

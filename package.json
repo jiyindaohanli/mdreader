@@ -40,6 +40,7 @@
     "markdown-it-front-matter": "^0.2.4",
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^12.3.0",
+    "morphdom": "^2.7.8",
     "mygo-runtime": "^0.10.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

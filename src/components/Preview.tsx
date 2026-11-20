@@ -1,3 +1,4 @@
+import morphdom from "morphdom";
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import type { Rendered } from "../lib/markdown";
 import { Files } from "../mygo";
@@ -24,56 +25,97 @@ let diagramCount = 0;
 export function Preview({ rendered, docPath, theme, handle, onScroll }: Props) {
   const scroll = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
+  const lastDocPath = useRef("");
 
   useEffect(() => {
     const pane = inner.current;
     if (!pane) return;
-    pane.innerHTML = rendered.html;
-    pane.classList.remove("fade");
-    void pane.offsetWidth;
-    pane.classList.add("fade");
+    const top = scroll.current?.scrollTop ?? 0;
+    const docChanged = lastDocPath.current !== docPath;
+    lastDocPath.current = docPath;
+
+    // Patch the new HTML into the old tree instead of replacing it: a full
+    // innerHTML reset jumped the scroll and threw away rendered diagrams and
+    // loaded images on every keystroke.
+    const template = document.createElement("div");
+    template.innerHTML = rendered.html;
+    morphdom(pane, template, {
+      childrenOnly: true,
+      onBeforeElUpdated: (fromEl, toEl) => {
+        if (fromEl.classList.contains("mermaid-block")) {
+          const code = toEl.querySelector(".mermaid-block__source code")?.textContent ?? "";
+          if (fromEl.dataset.mermaidKey === cacheKey(code, theme)) return false;
+          delete fromEl.dataset.mermaidKey;
+        }
+        if (fromEl.tagName === "IMG" && !docChanged) {
+          const img = fromEl as HTMLImageElement;
+          const original = img.dataset.originalSrc;
+          if (original && img.src.startsWith("data:") && toEl.getAttribute("src") === original) return false;
+        }
+        return true;
+      },
+    });
+    if (scroll.current) scroll.current.scrollTop = top;
 
     // Images beside the document: the page cannot read the disk itself.
     if (docPath) {
       for (const img of pane.querySelectorAll<HTMLImageElement>("img[src]")) {
         const src = img.getAttribute("src") ?? "";
         if (/^(https?:|data:|blob:)/i.test(src) || src.startsWith("//")) continue;
+        if (img.dataset.assetState === "loading") continue;
+        if (!docChanged && img.dataset.assetState === "done" && img.src.startsWith("data:")) continue;
+        img.dataset.originalSrc = src;
+        img.dataset.assetState = "loading";
         Files.asset(docPath, decodeURI(src))
           .then((data) => {
             img.src = data;
+            img.dataset.assetState = "done";
           })
           .catch(() => {
+            img.dataset.assetState = "failed";
             img.replaceWith(brokenImage(src));
           });
       }
     }
 
-    // Mermaid: a card until the reader asks for the diagram.
+    // Diagrams already drawn for this source and theme stay as they are.
     for (const block of pane.querySelectorAll<HTMLElement>(".mermaid-block")) {
-      const code = block.querySelector("code")?.textContent ?? "";
-      const button = block.querySelector<HTMLButtonElement>("[data-mermaid-render]");
-      const cached = mermaidCache.get(cacheKey(code, theme));
-      if (cached) {
-        draw(block, cached);
-        continue;
-      }
-      button?.addEventListener("click", async () => {
-        if (!button || button.disabled) return;
-        button.disabled = true;
-        button.textContent = "渲染中…";
-        try {
-          const svg = await renderMermaid(code, theme);
-          mermaidCache.set(cacheKey(code, theme), svg);
-          draw(block, svg);
-        } catch (err) {
-          button.disabled = false;
-          button.textContent = "重试";
-          const body = block.querySelector(".mermaid-block__body");
-          if (body) body.append(errorNote(err));
-        }
-      });
+      if (block.dataset.mermaidKey) continue;
+      const code = block.querySelector(".mermaid-block__source code")?.textContent ?? "";
+      const key = cacheKey(code, theme);
+      const cached = mermaidCache.get(key);
+      if (cached) draw(block, cached, key);
     }
   }, [rendered, docPath, theme]);
+
+  // One listener for every diagram button: morphdom keeps the elements, so
+  // per-button listeners would accumulate and capture stale source.
+  useEffect(() => {
+    const pane = inner.current;
+    if (!pane) return;
+    const onClick = async (event: MouseEvent) => {
+      const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-mermaid-render]");
+      if (!button || button.disabled) return;
+      const block = button.closest<HTMLElement>(".mermaid-block");
+      if (!block) return;
+      const code = block.querySelector(".mermaid-block__source code")?.textContent ?? "";
+      const key = cacheKey(code, theme);
+      button.disabled = true;
+      button.textContent = "渲染中…";
+      try {
+        const svg = await renderMermaid(code, theme);
+        mermaidCache.set(key, svg);
+        draw(block, svg, key);
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = "重试";
+        const body = block.querySelector(".mermaid-block__body");
+        if (body) body.append(errorNote(err));
+      }
+    };
+    pane.addEventListener("click", onClick);
+    return () => pane.removeEventListener("click", onClick);
+  }, [theme]);
 
   // Links open in the system browser; anchors scroll the preview.
   useEffect(() => {
@@ -153,9 +195,10 @@ function blockAt(pane: HTMLElement | null, line: number): HTMLElement | null {
 
 const cacheKey = (code: string, theme: string) => `${theme}\u0000${code}`;
 
-function draw(block: HTMLElement, svg: string) {
+function draw(block: HTMLElement, svg: string, key: string) {
   const body = block.querySelector(".mermaid-block__body");
   if (body) body.innerHTML = svg;
+  block.dataset.mermaidKey = key;
 }
 
 function brokenImage(src: string): HTMLElement {
