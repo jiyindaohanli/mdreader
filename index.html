@@ -4,9 +4,92 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MDReader</title>
+    <style>
+      /* Painted before the bundle runs: the window shows MDReader, not a white
+         rectangle, while WebView2 and React start. React replaces it. */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: #f2f2f7;
+        color: #6e6e73;
+        font: 13px/1.6 "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+      }
+      .boot {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+      }
+      .boot__mark {
+        width: 46px;
+        height: 46px;
+        border-radius: 12px;
+        background: #007aff;
+        color: #ffffff;
+        display: grid;
+        place-items: center;
+        font: 600 20px/1 "SF Mono", "Consolas", monospace;
+        box-shadow: 0 4px 14px rgb(0 122 255 / 0.25);
+      }
+      .boot__name {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .boot__bar {
+        width: 84px;
+        height: 2px;
+        border-radius: 1px;
+        background: #e5e5ea;
+        overflow: hidden;
+      }
+      .boot__bar::after {
+        content: "";
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 1px;
+        background: #007aff;
+        animation: boot 1s ease-in-out infinite;
+      }
+      @keyframes boot {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(250%);
+        }
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #141416;
+          color: #98989f;
+        }
+        .boot__bar {
+          background: #2c2c2e;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot__bar::after {
+          animation: none;
+          width: 100%;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot">
+        <div class="boot__mark">M</div>
+        <div class="boot__name">MDReader</div>
+        <div class="boot__bar"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
