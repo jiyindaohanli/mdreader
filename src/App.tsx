@@ -1,6 +1,6 @@
 import { currentWindow } from "mygo-runtime";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Editor, type EditorHandle } from "./components/Editor";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type EditorHandle } from "./components/Editor";
 import { EmptyState } from "./components/EmptyState";
 import { Outline } from "./components/Outline";
 import { Palette, type PaletteItem } from "./components/Palette";
@@ -8,6 +8,10 @@ import { Preview, type PreviewHandle } from "./components/Preview";
 import { StatusBar, type CursorInfo } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { TitleBar } from "./components/TitleBar";
+
+// The editor and CodeMirror are only sent when the reader switches to split
+// or edit: opening a file to read should not parse an editor.
+const Editor = lazy(() => import("./components/Editor").then((module) => ({ default: module.Editor })));
 import { buildExportHTML, exportableBody } from "./lib/exportHtml";
 import { useRenderedMarkdown } from "./lib/useRenderedMarkdown";
 import { baseName, folderName } from "./lib/paths";
@@ -59,6 +63,7 @@ export default function App() {
   const [overwrite, setOverwrite] = useState(false);
   const [previewSource, setPreviewSource] = useState(ws.buffer);
   const [heavyRequested, setHeavyRequested] = useState(false);
+  const [editorReady, setEditorReady] = useState(mode !== "read");
 
   const editor = useRef<EditorHandle>(null);
   const preview = useRef<PreviewHandle>(null);
@@ -154,24 +159,35 @@ export default function App() {
 
   // Where the reader was in the document that comes back.
   const remember = useCallback(() => {
-    const id = latest.current.active?.id;
-    if (!id) return;
-    const info = editor.current?.cursorInfo();
+    const doc = latest.current.active;
+    if (!doc) return;
+    const handle = editor.current;
+    const info = handle?.cursorInfo();
     if (info) setCursor(info);
-    latest.current.rememberView(id, editor.current?.cursor() ?? 0, preview.current?.scrollRatio() ?? 0);
+    latest.current.rememberView(doc.id, handle?.cursor() ?? doc.cursor, preview.current?.scrollRatio() ?? 0);
   }, []);
+
+  useEffect(() => {
+    if (mode !== "read") setEditorReady(true);
+  }, [mode]);
 
   useEffect(() => {
     if (!activeId || !ws.loaded) return;
     const saved = ws.active ? { cursor: ws.active.cursor, scroll: ws.active.scroll } : { cursor: 0, scroll: 0 };
     const frame = requestAnimationFrame(() => {
       preview.current?.scrollToRatio(saved.scroll || 0);
-      editor.current?.setCursor(saved.cursor);
+      if (editor.current) {
+        editor.current.setCursor(saved.cursor);
+      } else if (ws.active) {
+        // The editor is not mounted in the read view: the status bar still
+        // shows the saved position.
+        setCursor(cursorAt(ws.buffer, saved.cursor));
+      }
       setTopLine(preview.current?.topLine() ?? 1);
-      remember();
+      if (editor.current) remember();
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeId, ws.loaded, remember]);
+  }, [activeId, ws.loaded, remember, editorReady]);
 
   const toggleWrap = useCallback(() => {
     setWrap((on) => {
@@ -724,23 +740,27 @@ export default function App() {
       {ws.active && ws.loaded ? (
         <div className="panes" data-mode={mode}>
           <div className="pane pane--editor" style={mode === "split" ? { width: `${ratio * 100}%` } : undefined}>
-            <Editor
-              docId={ws.active.id}
-              docIds={ws.docs.map((doc) => doc.id)}
-              value={ws.buffer}
-              docPath={ws.active.path}
-              theme={theme}
-              wrap={wrap}
-              overwrite={overwrite}
-              fontSize={editorSize}
-              handle={editor}
-              onChange={(text) => {
-                ws.edit(text);
-                remember();
-              }}
-              onCursor={remember}
-              onScroll={syncFromEditor}
-            />
+            {editorReady && (
+              <Suspense fallback={<div className="editor editor--loading" />}>
+                <Editor
+                  docId={ws.active.id}
+                  docIds={ws.docs.map((doc) => doc.id)}
+                  value={ws.buffer}
+                  docPath={ws.active.path}
+                  theme={theme}
+                  wrap={wrap}
+                  overwrite={overwrite}
+                  fontSize={editorSize}
+                  handle={editor}
+                  onChange={(text) => {
+                    ws.edit(text);
+                    remember();
+                  }}
+                  onCursor={remember}
+                  onScroll={syncFromEditor}
+                />
+              </Suspense>
+            )}
           </div>
           <div className="splitter" role="separator" aria-orientation="vertical" onMouseDown={startResize} />
           <div className="pane pane--preview">
@@ -813,6 +833,23 @@ export default function App() {
       />
     </div>
   );
+}
+
+/** Line and column of an offset, for the read view without an editor. */
+function cursorAt(text: string, offset: number): CursorInfo {
+  const at = Math.max(0, Math.min(offset, text.length));
+  let line = 1;
+  let lineStart = 0;
+  let lines = 1;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) !== 10) continue;
+    lines++;
+    if (i < at) {
+      line++;
+      lineStart = i + 1;
+    }
+  }
+  return { line, column: at - lineStart + 1, selected: 0, lines };
 }
 
 function NoticeBar(props: {

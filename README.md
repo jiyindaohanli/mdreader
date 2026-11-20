@@ -24,6 +24,8 @@ Windows 上的 Markdown 阅读器兼编辑器。Go + MyGo（WebView2），单 ex
 - **格式全支持**：GFM（表格、任务列表、删除线、自动链接）、脚注、Front Matter、KaTeX 公式、Mermaid 图表（点击才渲染）、裸 HTML（DOMPurify 白名单过滤）、相对路径图片
 - **不阻塞输入**：Markdown 解析、代码高亮与 KaTeX 在 Web Worker 里跑，主线程只做 DOMPurify；
   Worker 不可用时自动回退主线程
+- **读模式不加载编辑器**：CodeMirror 只在第一次切到分栏 / 编辑时才下载并挂载，
+  打开文件阅读的启动更轻
 - **粘贴/拖入图片**：自动存到文档旁的 `assets/`，插入 Markdown 链接
 - **大纲**：`Ctrl+Shift+O` 开关，随滚动高亮，点击同时定位编辑器光标
 - **快速打开** `Ctrl+P` 与**命令面板** `Ctrl+Shift+P`

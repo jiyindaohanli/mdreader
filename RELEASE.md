@@ -119,7 +119,8 @@ signtool verify /pa /v build\windows-amd64\mdreader-setup-<version>-amd64.exe
 10. **外部修改**：在别的编辑器里改同一文件并保存，应用应弹「重新载入 / 保留我的」。
 11. **大文件**：`node fixtures/make-large.mjs` 生成 5MB / 12MB，确认 5MB 需手动渲染、
     12MB 被拒绝。
-12. **视图与导航**：`Ctrl+E` 三态、大纲（`Ctrl+Shift+O`）、`Ctrl+P`、命令面板、
+12. **视图与导航**：`Ctrl+E` 三态（第一次切到分栏 / 编辑时才加载编辑器，
+    不应空白或报错）、大纲（`Ctrl+Shift+O`）、`Ctrl+P`、命令面板、
     `Ctrl+F` / `Ctrl+H`、字号与深浅色。
 13. **导出**：导出 HTML 后断网打开，图片与公式都在；打印对话框可另存 PDF。
 14. **窗口与标签**：拖拽排序、拖出成新窗、拖进另一个窗口、关闭最后一个标签即收进托盘。
