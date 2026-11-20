@@ -24,6 +24,15 @@ export interface Doc {
   size: number;
 }
 
+/** Settings is what the page shows in its menu, and what the tray keeps. */
+export interface Settings {
+  /**
+   * CloseToTray keeps the app and its WebView2 alive when the window is
+   * closed, so opening the next file is a handoff instead of a cold start.
+   */
+  closeToTray: boolean;
+}
+
 /** ShellStatus is what the page shows about the app's place in Explorer. */
 export interface ShellStatus {
   supported: boolean;
@@ -116,6 +125,8 @@ export const Workspace = {
    * manager asked it to open while it ran.
    */
   openExternalFiles: bind<[], void>("Workspace.OpenExternalFiles", () => []),
+  /** QuitApp ends the app even when closing a window would only hide it. */
+  quitApp: bind<[], void>("Workspace.QuitApp", () => []),
   /** Recent returns the files the app opened lately, newest first. */
   recent: bind<[], string[]>("Workspace.Recent", () => []),
   /**
@@ -145,6 +156,11 @@ export const Workspace = {
    */
   saveAsset: bind<[string, string, string], string>("Workspace.SaveAsset", (docPath: string, ext: string, data: string) => [docPath, ext, data]),
   /**
+   * SetCloseToTray remembers whether closing the window keeps the app running,
+   * and keeps the tray item in step.
+   */
+  setCloseToTray: bind<[boolean], void>("Workspace.SetCloseToTray", (on: boolean) => [on]),
+  /**
    * SetDefaultApp opens the part of Settings where .md files are given to the app:
    * Windows keeps that choice to the user.
    */
@@ -159,6 +175,8 @@ export const Workspace = {
   setFormat: bind<[string, string, string], Doc>("Workspace.SetFormat", (id: string, eol: string, encoding: string) => [id, eol, encoding]),
   /** SetView keeps where the reader was in a document, for the next launch. */
   setView: bind<[string, number, number], void>("Workspace.SetView", (id: string, cursor: number, scroll: number) => [id, cursor, scroll]),
+  /** Settings returns the preferences the menu toggles. */
+  settings: bind<[], Settings>("Workspace.Settings", () => []),
   /**
    * ShellStatus reports whether this exe is registered in Explorer's "Open with"
    * list and the .md context menu.

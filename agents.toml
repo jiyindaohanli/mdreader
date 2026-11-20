@@ -5,8 +5,8 @@ description = "Windows Markdown 阅读器/编辑器（Go + MyGo/Wails 之外的 
 [[agents]]
 id = "shell"
 name = "Go 外壳与系统集成"
-scope = ["main.go", "workspace.go", "session.go", "shell.go", "shell_windows.go", "mygo.config.ts"]
-responsibilities = ["窗口与标签状态机", "单实例与文件关联", "右键菜单注册与修复", "会话恢复", "拖拽命中测试", "大文件上限"]
+scope = ["main.go", "workspace.go", "session.go", "shell.go", "shell_windows.go", "settings.go", "tray.go", "mygo.config.ts"]
+responsibilities = ["窗口与标签状态机", "单实例与文件关联", "右键菜单注册与修复", "托盘与关闭行为", "会话恢复", "拖拽命中测试", "大文件上限"]
 must_not_modify = ["src/components", "src/lib"]
 verify = ["go build ./...", "go vet ./...", "go test ./..."]
 

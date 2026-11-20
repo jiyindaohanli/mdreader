@@ -42,6 +42,7 @@ export default function App() {
   const [palette, setPalette] = useState<null | "files" | "commands">(null);
   const [recent, setRecent] = useState<string[]>([]);
   const [shell, setShell] = useState<ShellStatus | null>(null);
+  const [closeToTray, setCloseToTray] = useState(true);
   const [shellNotice, setShellNotice] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [topLine, setTopLine] = useState(1);
@@ -112,6 +113,19 @@ export default function App() {
     void Workspace.shellStatus()
       .then(setShell)
       .catch(() => setShell(null));
+  }, []);
+
+  // The tray can change "close to tray" too; the window picks it up when it
+  // comes back to the foreground.
+  useEffect(() => {
+    const refresh = () => {
+      void Workspace.settings()
+        .then((next) => setCloseToTray(next.closeToTray))
+        .catch(() => {});
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
   }, []);
 
   // Where the reader was in the document that comes back.
@@ -189,6 +203,16 @@ export default function App() {
 
   // Adds the exe to Explorer's "Open with" and the .md context menu, or
   // takes it out again. The registration is per user, in HKCU.
+  const toggleCloseToTray = useCallback(async () => {
+    const next = !closeToTray;
+    try {
+      await Workspace.setCloseToTray(next);
+      setCloseToTray(next);
+    } catch (error) {
+      setShellNotice(`设置失败：${String(error)}`);
+    }
+  }, [closeToTray]);
+
   const toggleShell = useCallback(async () => {
     if (!shell?.supported) return;
     try {
@@ -258,6 +282,12 @@ export default function App() {
       },
       { key: "cmd-default", label: "设为默认 .md 程序", run: () => latest.current.setDefaultApp() },
       {
+        key: "cmd-tray",
+        label: closeToTray ? "关闭时收进托盘：开" : "关闭时收进托盘：关",
+        run: () => void toggleCloseToTray(),
+      },
+      { key: "cmd-quit", label: "退出 MDReader", run: () => void Workspace.quitApp() },
+      {
         key: "cmd-shell",
         label: shell?.registered ? "取消右键打开（.md）" : "加入右键打开（.md）",
         run: () => void toggleShell(),
@@ -265,7 +295,7 @@ export default function App() {
       { key: "cmd-export", label: "导出为 HTML…", run: () => void exportHtml() },
       { key: "cmd-print", label: "打印 / 另存为 PDF", run: () => window.print() },
     ];
-  }, [theme, exportHtml, shell, toggleShell]);
+  }, [theme, exportHtml, shell, toggleShell, closeToTray, toggleCloseToTray]);
 
   const cycleMode = useCallback(() => {
     setMode((current) => MODES[(MODES.findIndex((item) => item.id === current) + 1) % MODES.length]!.id);
@@ -558,6 +588,16 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
+                  void toggleCloseToTray();
+                }}
+              >
+                <span className="menu__check">{closeToTray ? "✓" : ""}</span>
+                关闭时收进托盘
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
                   if (ws.active) ws.reveal(ws.active.id);
                 }}
               >
@@ -592,6 +632,16 @@ export default function App() {
                 }}
               >
                 打印 / 另存为 PDF
+              </button>
+              <div className="menu__separator" />
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void Workspace.quitApp();
+                }}
+              >
+                退出 MDReader
               </button>
             </div>
           )}

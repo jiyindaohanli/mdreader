@@ -57,17 +57,21 @@ var DragTarget = mygo.NewEvent[string]("drag-target")
 // a document is not here: it lives in the page editing it, and only passes
 // through on save or when a tab moves to another window.
 type Workspace struct {
-	mu      sync.Mutex
-	windows map[int]*WindowState
-	order   []int
-	docs    map[string]*Doc
-	native  map[int]*mygo.Window
-	handoff map[string]string
-	nextID  int
-	active  int
-	startup []string
-	timer   *time.Timer
-	target  int
+	mu        sync.Mutex
+	windows   map[int]*WindowState
+	order     []int
+	docs      map[string]*Doc
+	native    map[int]*mygo.Window
+	handoff   map[string]string
+	nextID    int
+	active    int
+	startup   []string
+	timer     *time.Timer
+	target    int
+	tray      *mygo.Tray
+	trayItem  *mygo.MenuItem
+	trayReady bool
+	quitting  bool
 }
 
 var workspace = &Workspace{
@@ -186,6 +190,12 @@ func (s *Workspace) Open(win int, path string) (Doc, error) {
 		log.Printf("无法记录最近文件: %v", err)
 	}
 	s.publish()
+	if native := s.nativeWindow(win); native != nil {
+		if !native.IsVisible() {
+			native.Show()
+		}
+		native.Focus()
+	}
 	return opened, nil
 }
 
@@ -210,6 +220,9 @@ func (s *Workspace) Close(win int, id string) error {
 	if empty {
 		if native := s.nativeWindow(win); native != nil {
 			native.Close()
+			// With close-to-tray the window is hidden, not destroyed: the
+			// page still has to learn that the last tab is gone.
+			s.publish()
 			return nil
 		}
 	}
@@ -708,6 +721,9 @@ func (s *Workspace) OpenExternalFiles() {
 		}
 	}
 	if native := s.nativeWindow(win); native != nil {
+		if !native.IsVisible() {
+			native.Show()
+		}
 		native.Focus()
 	}
 }
@@ -900,6 +916,15 @@ func createWindow(id, x, y int) *mygo.Window {
 		native.SetPosition(x, y)
 	}
 	native.OnFocus(func() { workspace.setActive(id) })
+	native.OnClose(func(e *mygo.CloseEvent) {
+		// Closing the window keeps the app (and WebView2) warm unless the
+		// tray is missing, the reader asked to quit, or the setting is off.
+		if !workspace.shouldHideOnClose() {
+			return
+		}
+		e.PreventDefault()
+		native.Hide()
+	})
 	native.OnClosed(func() { workspace.removeWindow(id) })
 	return native
 }

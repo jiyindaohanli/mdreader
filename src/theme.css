@@ -1555,3 +1555,10 @@ button {
 .statusbar__check {
   color: var(--accent);
 }
+
+.menu__check {
+  display: inline-block;
+  width: 14px;
+  margin-right: 6px;
+  color: var(--accent);
+}

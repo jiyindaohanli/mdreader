@@ -27,8 +27,17 @@ func main() {
 
 	mygo.Bind(Files{}, workspace)
 	mygo.App.OnOpenFile(func(path string) { workspace.queueFile(path) })
+	// A quit from the tray, the menu or the OS ends the app for real:
+	// the windows must not turn their close into a hide.
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		workspace.mu.Lock()
+		workspace.quitting = true
+		workspace.mu.Unlock()
+	})
 
 	mygo.App.WhenReady(func() {
+		startTray()
+
 		// A single exe is run without an installer, so it registers its own
 		// "Open with" and .md context menu entries on first run. Not while
 		// developing: that would point Explorer at a build in .mygo/.
