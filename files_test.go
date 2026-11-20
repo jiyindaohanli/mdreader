@@ -59,7 +59,7 @@ func TestOpenThenSaveKeepsBOMAndCRLF(t *testing.T) {
 		t.Errorf("大小 = %d，文件是 %d", doc.size, len(original))
 	}
 
-	if _, _, err := writeDocument(path, doc.content, doc.eol, doc.encoding); err != nil {
+	if _, _, err := writeDocument(path, doc.content, doc.eol, doc.encoding, true); err != nil {
 		t.Fatalf("writeDocument: %v", err)
 	}
 	saved, err := os.ReadFile(path)
@@ -88,7 +88,7 @@ func TestEditKeepsBOMAndCRLFAndSnapshotsPrevious(t *testing.T) {
 	}
 
 	edited := doc.content + "\n新增的一行。\n"
-	if _, _, err := writeDocument(path, edited, doc.eol, doc.encoding); err != nil {
+	if _, _, err := writeDocument(path, edited, doc.eol, doc.encoding, true); err != nil {
 		t.Fatalf("writeDocument: %v", err)
 	}
 	saved, err := os.ReadFile(path)
@@ -124,7 +124,7 @@ func TestHistoryKeepsTenNewest(t *testing.T) {
 	path := filepath.Join(dir, "note.md")
 	const versions = historyLimit + 3
 	for i := 0; i < versions; i++ {
-		if _, _, err := writeDocument(path, fmt.Sprintf("version %d\n", i), "\n", encUTF8); err != nil {
+		if _, _, err := writeDocument(path, fmt.Sprintf("version %d\n", i), "\n", encUTF8, true); err != nil {
 			t.Fatalf("写入第 %d 版: %v", i, err)
 		}
 		// Snapshot names carry milliseconds: without a pause two writes can
@@ -161,7 +161,7 @@ func TestHistoryKeepsTenNewest(t *testing.T) {
 }
 
 func TestWriteDocumentRefusesEmptyPath(t *testing.T) {
-	if _, _, err := writeDocument("", "x", "\n", encUTF8); err == nil {
+	if _, _, err := writeDocument("", "x", "\n", encUTF8, true); err == nil {
 		t.Fatal("空路径应当报错")
 	}
 }
@@ -177,7 +177,7 @@ func TestWriteDocumentReportsReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(path, 0o644) })
 
-	_, _, err := writeDocument(path, "改掉\n", "\n", encUTF8)
+	_, _, err := writeDocument(path, "改掉\n", "\n", encUTF8, true)
 	if err == nil {
 		t.Skip("这个环境里只读文件仍可写入（管理员/组策略），跳过")
 	}
@@ -352,7 +352,7 @@ func TestEncodingRoundTrip(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "enc.md")
-			if _, _, err := writeDocument(path, text, "\r\n", c.encoding); err != nil {
+			if _, _, err := writeDocument(path, text, "\r\n", c.encoding, true); err != nil {
 				t.Fatalf("写入: %v", err)
 			}
 			first, err := os.ReadFile(path)
@@ -375,7 +375,7 @@ func TestEncodingRoundTrip(t *testing.T) {
 			if doc.eol != "\r\n" {
 				t.Errorf("换行 = %q，想要 CRLF", doc.eol)
 			}
-			if _, _, err := writeDocument(path, doc.content, doc.eol, doc.encoding); err != nil {
+			if _, _, err := writeDocument(path, doc.content, doc.eol, doc.encoding, true); err != nil {
 				t.Fatalf("重新写入: %v", err)
 			}
 			again, err := os.ReadFile(path)
@@ -391,14 +391,14 @@ func TestEncodingRoundTrip(t *testing.T) {
 
 func TestWriteDocumentRejectsBadFormats(t *testing.T) {
 	dir := t.TempDir()
-	if _, _, err := writeDocument(filepath.Join(dir, "a.md"), "x", "\n", "utf-32"); err == nil {
+	if _, _, err := writeDocument(filepath.Join(dir, "a.md"), "x", "\n", "utf-32", true); err == nil {
 		t.Error("未知编码应当报错")
 	}
-	if _, _, err := writeDocument(filepath.Join(dir, "b.md"), "x", "\n\r", encUTF8); err == nil {
+	if _, _, err := writeDocument(filepath.Join(dir, "b.md"), "x", "\n\r", encUTF8, true); err == nil {
 		t.Error("未知换行符应当报错")
 	}
 	// GBK has no emoji: saving must fail instead of writing a replacement.
-	if _, _, err := writeDocument(filepath.Join(dir, "c.md"), "🙂", "\n", encGBK); err == nil {
+	if _, _, err := writeDocument(filepath.Join(dir, "c.md"), "🙂", "\n", encGBK, true); err == nil {
 		t.Error("GBK 无法表示的字符应当报错")
 	}
 }
@@ -442,5 +442,41 @@ func TestSetFormatUpdatesTheDocument(t *testing.T) {
 	}
 	if doc.Encoding != encGBK {
 		t.Error("失败的切换不应改动文档")
+	}
+}
+
+func TestSaveThrottlesAutosaveSnapshots(t *testing.T) {
+	t.Setenv("AppData", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.md")
+	if err := os.WriteFile(path, []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc := &Doc{ID: "d1", Path: path, EOL: "\n", Encoding: encUTF8}
+	s := &Workspace{docs: map[string]*Doc{"d1": doc}}
+
+	if _, err := s.Save("d1", "b\n", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Save("d1", "c\n", false); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, ".mdr-history", "note"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("一分钟内的自动保存应只留 1 份快照，实际 %d", len(entries))
+	}
+
+	if _, err := s.Save("d1", "d\n", true); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = os.ReadDir(filepath.Join(dir, ".mdr-history", "note"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("手动保存应当补一份快照，实际 %d", len(entries))
 	}
 }

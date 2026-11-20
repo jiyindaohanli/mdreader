@@ -31,6 +31,17 @@ func startTray() {
 			}
 		},
 	}
+	login := &mygo.MenuItem{
+		ID:      "start-at-login",
+		Label:   "开机启动（隐藏到托盘）",
+		Type:    mygo.MenuItemCheckbox,
+		Checked: autostartInstalled(),
+		Click: func(item *mygo.MenuItem, _ *mygo.Window) {
+			if err := workspace.SetStartAtLogin(item.IsChecked()); err != nil {
+				log.Printf("无法设置开机启动: %v", err)
+			}
+		},
+	}
 	quit := &mygo.MenuItem{
 		ID:    "quit",
 		Label: "退出 MDReader",
@@ -40,6 +51,7 @@ func startTray() {
 		open,
 		{Type: mygo.MenuItemSeparator},
 		keep,
+		login,
 		{Type: mygo.MenuItemSeparator},
 		quit,
 	})
@@ -61,6 +73,7 @@ func startTray() {
 	workspace.mu.Lock()
 	workspace.tray = tray
 	workspace.trayItem = keep
+	workspace.trayLogin = login
 	workspace.trayReady = true
 	workspace.mu.Unlock()
 }

@@ -43,6 +43,7 @@ export default function App() {
   const [recent, setRecent] = useState<string[]>([]);
   const [shell, setShell] = useState<ShellStatus | null>(null);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [startAtLogin, setStartAtLogin] = useState(false);
   const [shellNotice, setShellNotice] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [topLine, setTopLine] = useState(1);
@@ -136,7 +137,10 @@ export default function App() {
   useEffect(() => {
     const refresh = () => {
       void Workspace.settings()
-        .then((next) => setCloseToTray(next.closeToTray))
+        .then((next) => {
+          setCloseToTray(next.closeToTray);
+          setStartAtLogin(next.startAtLogin);
+        })
         .catch(() => {});
     };
     refresh();
@@ -229,6 +233,21 @@ export default function App() {
     }
   }, [closeToTray]);
 
+  const toggleStartAtLogin = useCallback(async () => {
+    const next = !startAtLogin;
+    try {
+      await Workspace.setStartAtLogin(next);
+      setStartAtLogin(next);
+    } catch (error) {
+      setShellNotice(`设置失败：${String(error)}`);
+    }
+  }, [startAtLogin]);
+
+  const quit = useCallback(async () => {
+    await ws.saveAll();
+    await Workspace.quitApp();
+  }, [ws.saveAll]);
+
   const toggleShell = useCallback(async () => {
     if (!shell?.supported) return;
     try {
@@ -302,7 +321,12 @@ export default function App() {
         label: closeToTray ? "关闭时收进托盘：开" : "关闭时收进托盘：关",
         run: () => void toggleCloseToTray(),
       },
-      { key: "cmd-quit", label: "退出 MDReader", run: () => void Workspace.quitApp() },
+      {
+        key: "cmd-login",
+        label: startAtLogin ? "开机启动（隐藏到托盘）：开" : "开机启动（隐藏到托盘）：关",
+        run: () => void toggleStartAtLogin(),
+      },
+      { key: "cmd-quit", label: "退出 MDReader", run: () => void quit() },
       {
         key: "cmd-shell",
         label: shell?.registered ? "取消右键打开（.md）" : "加入右键打开（.md）",
@@ -311,7 +335,7 @@ export default function App() {
       { key: "cmd-export", label: "导出为 HTML…", run: () => void exportHtml() },
       { key: "cmd-print", label: "打印 / 另存为 PDF", run: () => window.print() },
     ];
-  }, [theme, exportHtml, shell, toggleShell, closeToTray, toggleCloseToTray]);
+  }, [theme, exportHtml, shell, toggleShell, closeToTray, toggleCloseToTray, startAtLogin, toggleStartAtLogin, quit]);
 
   const cycleMode = useCallback(() => {
     setMode((current) => MODES[(MODES.findIndex((item) => item.id === current) + 1) % MODES.length]!.id);
@@ -614,6 +638,16 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
+                  void toggleStartAtLogin();
+                }}
+              >
+                <span className="menu__check">{startAtLogin ? "✓" : ""}</span>
+                开机启动（隐藏到托盘）
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
                   if (ws.active) ws.reveal(ws.active.id);
                 }}
               >
@@ -654,7 +688,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  void Workspace.quitApp();
+                  void quit();
                 }}
               >
                 退出 MDReader

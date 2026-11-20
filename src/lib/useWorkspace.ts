@@ -25,6 +25,11 @@ export function useWorkspace() {
 
   const buffersRef = useRef(buffers);
   buffersRef.current = buffers;
+  const stateRef = useRef<State | null>(state);
+  stateRef.current = state;
+  // dirtyRef is set synchronously by a keystroke, before Go's state round
+  // trip says the document is dirty; saving on close needs it.
+  const dirtyRef = useRef<Record<string, boolean>>({});
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const view = useRef<Record<string, { cursor: number; scroll: number }>>({});
 
@@ -80,18 +85,74 @@ export function useWorkspace() {
     if (!active || buffersRef.current[active.id] !== undefined) return;
     let alive = true;
     void Workspace.content(active.id).then((text) => {
-      if (alive) setBuffers((current) => ({ ...current, [active.id]: text }));
+      if (alive) {
+        setBuffers((current) => ({ ...current, [active.id]: text }));
+        dirtyRef.current[active.id] = false;
+      }
     });
     return () => {
       alive = false;
     };
   }, [active]);
 
+  // Saves every dirty document now. Quitting and hiding call it so the last
+  // few hundred milliseconds of typing are not lost.
+  const saveAll = useCallback(async () => {
+    const docs = stateRef.current?.docs ?? [];
+    await Promise.all(
+      docs
+        .filter((doc) => doc.dirty || dirtyRef.current[doc.id])
+        .map(async (doc) => {
+          const text = buffersRef.current[doc.id];
+          if (text === undefined) return;
+          clearTimeout(timers.current[doc.id]);
+          delete timers.current[doc.id];
+          try {
+            await Workspace.save(doc.id, text, true);
+            dirtyRef.current[doc.id] = false;
+          } catch {
+            // One failed save must not block hiding or quitting.
+          }
+        }),
+    );
+  }, []);
+
+  // The window can lose focus before the autosave timer fires: save then, and
+  // when the window is hidden (close-to-tray), so the tray quit is safe.
+  useEffect(() => {
+    const flush = () => void saveAll();
+    const visibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("blur", flush);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.removeEventListener("blur", flush);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [saveAll]);
+
+  // The window is about to hide: save, then let Go finish the hide. Go hides
+  // on a timeout too, so a failed save cannot leave the window stuck open.
+  useEffect(() => {
+    let alive = true;
+    const off = events.hideRequested.on(() => {
+      void saveAll().finally(() => {
+        if (alive) void Workspace.hideWindow(win);
+      });
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [saveAll, win]);
+
   const persist = useCallback(async (id: string, text: string, force = false) => {
     clearTimeout(timers.current[id]);
     delete timers.current[id];
     try {
-      await Workspace.save(id, text);
+      await Workspace.save(id, text, force);
+      dirtyRef.current[id] = false;
       if (force) await Workspace.setDirty(id, false);
     } catch (err) {
       setNotice({ id, kind: "error", title: "", text: `保存失败：${message(err)}` });
@@ -102,7 +163,9 @@ export function useWorkspace() {
     (text: string) => {
       const doc = activeRef.current;
       if (!doc) return;
-      setBuffers((current) => ({ ...current, [doc.id]: text }));
+      buffersRef.current = { ...buffersRef.current, [doc.id]: text };
+      dirtyRef.current[doc.id] = true;
+      setBuffers(buffersRef.current);
       void Workspace.setDirty(doc.id, true);
       clearTimeout(timers.current[doc.id]);
       timers.current[doc.id] = setTimeout(() => void persist(doc.id, text), AUTOSAVE_DELAY);
@@ -116,7 +179,10 @@ export function useWorkspace() {
     const text = buffersRef.current[doc.id] ?? "";
     try {
       const saved = await Workspace.saveAs(win, doc.id, text);
-      if (saved.id) setBuffers((current) => ({ ...current, [saved.id]: text }));
+      if (saved.id) {
+        setBuffers((current) => ({ ...current, [saved.id]: text }));
+        dirtyRef.current[saved.id] = false;
+      }
     } catch (err) {
       setNotice({ id: doc.id, kind: "error", title: doc.title, text: `另存为失败：${message(err)}` });
     }
@@ -141,7 +207,7 @@ export function useWorkspace() {
       closeTab: (id: string) => {
         const doc = state?.docs.find((item) => item.id === id);
         const text = buffersRef.current[id];
-        if (doc?.dirty && text !== undefined) void Workspace.save(id, text);
+        if (doc?.dirty && text !== undefined) void Workspace.save(id, text, true);
         void Workspace.close(win, id);
       },
       activate: (id: string) => void Workspace.activate(win, id),
@@ -184,7 +250,8 @@ export function useWorkspace() {
         void (async () => {
           try {
             await Workspace.setFormat(id, eol, encoding);
-            await Workspace.save(id, text);
+            await Workspace.save(id, text, true);
+            dirtyRef.current[id] = false;
           } catch (err) {
             // Put the status bar back to what the file on disk still is.
             if (before) {
@@ -202,6 +269,7 @@ export function useWorkspace() {
         });
         if (text === "") return;
         setBuffers((current) => ({ ...current, [id]: text }));
+        dirtyRef.current[id] = false;
         setNotice(null);
       },
       keepDraft: async (id: string) => {
@@ -232,6 +300,7 @@ export function useWorkspace() {
     edit,
     save,
     saveAs,
+    saveAll,
     ...actions,
   };
 }

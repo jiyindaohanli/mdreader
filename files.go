@@ -122,7 +122,7 @@ func readDocument(path string) (document, error) {
 
 // writeDocument writes the content in the line endings and encoding the
 // document has, keeping up to historyLimit copies of what it replaces.
-func writeDocument(path, content, eol, encoding string) (modTime, size int64, err error) {
+func writeDocument(path, content, eol, encoding string, keepHistory bool) (modTime, size int64, err error) {
 	if path == "" {
 		return 0, 0, fmt.Errorf("没有可写入的文件路径")
 	}
@@ -140,10 +140,12 @@ func writeDocument(path, content, eol, encoding string) (modTime, size int64, er
 	if err != nil {
 		return 0, 0, err
 	}
-	if previous, err := os.ReadFile(path); err == nil && string(previous) != string(raw) {
-		snapshot(path, previous)
-	} else if err != nil && !os.IsNotExist(err) {
-		return 0, 0, err
+	if keepHistory {
+		if previous, err := os.ReadFile(path); err == nil && string(previous) != string(raw) {
+			snapshot(path, previous)
+		} else if err != nil && !os.IsNotExist(err) {
+			return 0, 0, err
+		}
 	}
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		return 0, 0, describeWriteError(err)

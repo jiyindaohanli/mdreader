@@ -29,6 +29,10 @@ type Doc struct {
 	Missing  bool    `json:"missing"`
 	External bool    `json:"external"`
 	Size     int64   `json:"size"`
+
+	// lastSnapshot is when the previous version was last kept, for the
+	// autosave throttle. It is not shown and not saved.
+	lastSnapshot int64
 }
 
 // WindowState is a window's tabs, in the order the tab bar shows them.
@@ -53,25 +57,33 @@ var ExternalChange = mygo.NewEvent[string]("external-change")
 // DragTarget tells a window that a dragged tab is over it, and which document.
 var DragTarget = mygo.NewEvent[string]("drag-target")
 
+// HideRequested asks a page to save its documents, then call
+// Workspace.HideWindow. Closing the window waits for that, with a timeout, so
+// closing right after typing does not lose the last keystrokes.
+var HideRequested = mygo.NewEvent[bool]("hide-requested")
+
 // Workspace is the source of truth for windows, tabs and documents. The text of
 // a document is not here: it lives in the page editing it, and only passes
 // through on save or when a tab moves to another window.
 type Workspace struct {
-	mu        sync.Mutex
-	windows   map[int]*WindowState
-	order     []int
-	docs      map[string]*Doc
-	native    map[int]*mygo.Window
-	handoff   map[string]string
-	nextID    int
-	active    int
-	startup   []string
-	timer     *time.Timer
-	target    int
-	tray      *mygo.Tray
-	trayItem  *mygo.MenuItem
-	trayReady bool
-	quitting  bool
+	mu          sync.Mutex
+	windows     map[int]*WindowState
+	order       []int
+	docs        map[string]*Doc
+	native      map[int]*mygo.Window
+	handoff     map[string]string
+	nextID      int
+	active      int
+	startup     []string
+	timer       *time.Timer
+	target      int
+	tray        *mygo.Tray
+	trayItem    *mygo.MenuItem
+	trayLogin   *mygo.MenuItem
+	trayReady   bool
+	quitting    bool
+	startHidden bool
+	hideTimers  map[int]*time.Timer
 }
 
 var workspace = &Workspace{
@@ -276,7 +288,7 @@ func (s *Workspace) Detach(win int, id string, x, y int) error {
 	s.order = append(s.order, newWin)
 	s.mu.Unlock()
 
-	if native := createWindow(newWin, x-160, y-16); native != nil {
+	if native := createWindow(newWin, x-160, y-16, false); native != nil {
 		s.mu.Lock()
 		s.native[newWin] = native
 		s.mu.Unlock()
@@ -556,9 +568,15 @@ func (s *Workspace) SetFormat(id, eol, encoding string) (Doc, error) {
 	return saved, nil
 }
 
+// snapshotInterval is how often an autosave may copy the previous version to
+// .mdr-history. Typing for a minute should not fill the folder with copies of
+// the same growing file; Ctrl+S and other explicit saves always snapshot.
+const snapshotInterval = time.Minute
+
 // Save writes a document's text into its file, in the line endings and encoding
-// it had, after keeping the previous version in .mdr-history.
-func (s *Workspace) Save(id, content string) (Doc, error) {
+// it had, keeping the previous version in .mdr-history when this save is
+// explicit or the last copy is old enough.
+func (s *Workspace) Save(id, content string, explicit bool) (Doc, error) {
 	s.mu.Lock()
 	doc := s.docs[id]
 	if doc == nil {
@@ -566,9 +584,11 @@ func (s *Workspace) Save(id, content string) (Doc, error) {
 		return Doc{}, fmt.Errorf("文档不存在")
 	}
 	path, eol, encoding := doc.Path, doc.EOL, doc.Encoding
+	now := time.Now().UnixMilli()
+	keepHistory := explicit || now-doc.lastSnapshot >= snapshotInterval.Milliseconds()
 	s.mu.Unlock()
 
-	modTime, size, err := writeDocument(path, content, eol, encoding)
+	modTime, size, err := writeDocument(path, content, eol, encoding, keepHistory)
 	if err != nil {
 		return Doc{}, err
 	}
@@ -579,6 +599,9 @@ func (s *Workspace) Save(id, content string) (Doc, error) {
 		doc.Dirty = false
 		doc.External = false
 		doc.Missing = false
+		if keepHistory {
+			doc.lastSnapshot = now
+		}
 	}
 	saved := *s.docs[id]
 	s.mu.Unlock()
@@ -612,7 +635,7 @@ func (s *Workspace) SaveAs(win int, id, content string) (Doc, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		os.WriteFile(path, nil, 0o644)
 	}
-	modTime, size, err := writeDocument(path, content, doc.EOL, doc.Encoding)
+	modTime, size, err := writeDocument(path, content, doc.EOL, doc.Encoding, true)
 	if err != nil {
 		return Doc{}, err
 	}
@@ -728,6 +751,42 @@ func (s *Workspace) OpenExternalFiles() {
 	}
 }
 
+// requestHide asks the page to save, and hides after the answer or a timeout.
+// The timer also covers a page that is gone or busy.
+func (s *Workspace) requestHide(id int, native *mygo.Window) {
+	s.mu.Lock()
+	if s.hideTimers == nil {
+		s.hideTimers = map[int]*time.Timer{}
+	}
+	if timer := s.hideTimers[id]; timer != nil {
+		timer.Stop()
+	}
+	s.hideTimers[id] = time.AfterFunc(600*time.Millisecond, func() {
+		native.Hide()
+		s.mu.Lock()
+		delete(s.hideTimers, id)
+		s.mu.Unlock()
+	})
+	s.mu.Unlock()
+	HideRequested.Emit(native, true)
+}
+
+// HideWindow is called by a page once its documents are saved: it finishes a
+// close that requestHide started.
+func (s *Workspace) HideWindow(win int) error {
+	s.mu.Lock()
+	if timer := s.hideTimers[win]; timer != nil {
+		timer.Stop()
+		delete(s.hideTimers, win)
+	}
+	native := s.native[win]
+	s.mu.Unlock()
+	if native != nil {
+		native.Hide()
+	}
+	return nil
+}
+
 // ---- internals ----
 
 func (s *Workspace) snapshotLocked() State {
@@ -830,6 +889,10 @@ func (s *Workspace) newDocLocked(path string, file document) *Doc {
 
 func (s *Workspace) removeWindow(win int) {
 	s.mu.Lock()
+	if timer := s.hideTimers[win]; timer != nil {
+		timer.Stop()
+		delete(s.hideTimers, win)
+	}
 	state := s.windows[win]
 	if state != nil {
 		for _, id := range state.Docs {
@@ -883,11 +946,12 @@ func (s *Workspace) createStartupWindow() int {
 	s.mu.Lock()
 	s.nextID++
 	id := s.nextID
+	hidden := s.startHidden
 	s.windows[id] = &WindowState{ID: id}
 	s.order = append(s.order, id)
 	s.active = id
 	s.mu.Unlock()
-	if native := createWindow(id, 0, 0); native != nil {
+	if native := createWindow(id, 0, 0, hidden); native != nil {
 		s.mu.Lock()
 		s.native[id] = native
 		s.mu.Unlock()
@@ -897,7 +961,7 @@ func (s *Workspace) createStartupWindow() int {
 
 // ---- helpers ----
 
-func createWindow(id, x, y int) *mygo.Window {
+func createWindow(id, x, y int, hidden bool) *mygo.Window {
 	native := mygo.NewWindow(mygo.WindowOptions{
 		Title:           "MDReader",
 		Width:           1200,
@@ -905,6 +969,7 @@ func createWindow(id, x, y int) *mygo.Window {
 		MinWidth:        720,
 		MinHeight:       520,
 		Frameless:       true,
+		Hidden:          hidden,
 		BackgroundColor: "light-dark(#f2f2f7, #141416)",
 		StateKey:        fmt.Sprintf("win-%d", id),
 		URL:             fmt.Sprintf("/?w=%d", id),
@@ -923,7 +988,7 @@ func createWindow(id, x, y int) *mygo.Window {
 			return
 		}
 		e.PreventDefault()
-		native.Hide()
+		workspace.requestHide(id, native)
 	})
 	native.OnClosed(func() { workspace.removeWindow(id) })
 	return native

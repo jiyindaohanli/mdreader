@@ -14,6 +14,10 @@ type Settings struct {
 	// CloseToTray keeps the app and its WebView2 alive when the window is
 	// closed, so opening the next file is a handoff instead of a cold start.
 	CloseToTray bool `json:"closeToTray"`
+	// StartAtLogin starts the app hidden when the user logs in, so the very
+	// first file opened does not pay WebView2's cold start. It lives in the
+	// registry, not in preferences.json.
+	StartAtLogin bool `json:"startAtLogin"`
 }
 
 // settingsFile reads a missing field as the default: an older file, or none,
@@ -56,7 +60,8 @@ func storeSettings(value Settings) error {
 	if err := os.MkdirAll(appData(), 0o755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(value, "", "  ")
+	// Only closeToTray lives here; the login entry is the registry's.
+	raw, err := json.MarshalIndent(settingsFile{CloseToTray: &value.CloseToTray}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -72,7 +77,30 @@ func resetSettingsCache() {
 }
 
 // Settings returns the preferences the menu toggles.
-func (s *Workspace) Settings() Settings { return loadSettings() }
+func (s *Workspace) Settings() Settings {
+	value := loadSettings()
+	value.StartAtLogin = autostartInstalled()
+	return value
+}
+
+// SetStartAtLogin registers or removes the run-at-login entry for the exe
+// that is running now.
+func (s *Workspace) SetStartAtLogin(on bool) error {
+	exe, err := currentExePath()
+	if err != nil {
+		return err
+	}
+	if err := setAutostart(exe, on); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	item := s.trayLogin
+	s.mu.Unlock()
+	if item != nil {
+		item.SetChecked(on)
+	}
+	return nil
+}
 
 // SetCloseToTray remembers whether closing the window keeps the app running,
 // and keeps the tray item in step.

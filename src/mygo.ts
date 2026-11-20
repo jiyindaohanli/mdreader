@@ -31,6 +31,12 @@ export interface Settings {
    * closed, so opening the next file is a handoff instead of a cold start.
    */
   closeToTray: boolean;
+  /**
+   * StartAtLogin starts the app hidden when the user logs in, so the very
+   * first file opened does not pay WebView2's cold start. It lives in the
+   * registry, not in preferences.json.
+   */
+  startAtLogin: boolean;
 }
 
 /** ShellStatus is what the page shows about the app's place in Explorer. */
@@ -107,6 +113,11 @@ export const Workspace = {
    */
   handoff: bind<[string, string], void>("Workspace.Handoff", (id: string, content: string) => [id, content]),
   /**
+   * HideWindow is called by a page once its documents are saved: it finishes a
+   * close that requestHide started.
+   */
+  hideWindow: bind<[number], void>("Workspace.HideWindow", (win: number) => [win]),
+  /**
    * KeepDraft keeps the text of a page when the file changed on disk, and takes
    * the file's new details as the ones to compare against from now on.
    */
@@ -142,9 +153,10 @@ export const Workspace = {
   reveal: bind<[string], void>("Workspace.Reveal", (id: string) => [id]),
   /**
    * Save writes a document's text into its file, in the line endings and encoding
-   * it had, after keeping the previous version in .mdr-history.
+   * it had, keeping the previous version in .mdr-history when this save is
+   * explicit or the last copy is old enough.
    */
-  save: bind<[string, string], Doc>("Workspace.Save", (id: string, content: string) => [id, content]),
+  save: bind<[string, string, boolean], Doc>("Workspace.Save", (id: string, content: string, explicit: boolean) => [id, content, explicit]),
   /**
    * SaveAs saves a new document under a name the user picks, and forgets the
    * placeholder it was created with.
@@ -173,6 +185,11 @@ export const Workspace = {
    * what the bar shows.
    */
   setFormat: bind<[string, string, string], Doc>("Workspace.SetFormat", (id: string, eol: string, encoding: string) => [id, eol, encoding]),
+  /**
+   * SetStartAtLogin registers or removes the run-at-login entry for the exe
+   * that is running now.
+   */
+  setStartAtLogin: bind<[boolean], void>("Workspace.SetStartAtLogin", (on: boolean) => [on]),
   /** SetView keeps where the reader was in a document, for the next launch. */
   setView: bind<[string, number, number], void>("Workspace.SetView", (id: string, cursor: number, scroll: number) => [id, cursor, scroll]),
   /** Settings returns the preferences the menu toggles. */
@@ -200,4 +217,10 @@ export const events = {
   externalChange: event<string>("external-change"),
   /** DragTarget tells a window that a dragged tab is over it, and which document. */
   dragTarget: event<string>("drag-target"),
+  /**
+   * HideRequested asks a page to save its documents, then call
+   * Workspace.HideWindow. Closing the window waits for that, with a timeout, so
+   * closing right after typing does not lose the last keystrokes.
+   */
+  hideRequested: event<boolean>("hide-requested"),
 } as const;

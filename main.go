@@ -9,6 +9,10 @@ import (
 )
 
 func main() {
+	// `--hidden` is what the run-at-login entry passes: restore the session
+	// and warm WebView2, but leave the windows hidden in the tray.
+	startHidden := hasArg(os.Args[1:], "--hidden")
+
 	// `MDReader.exe --register` joins the Explorer menus without opening a
 	// window, which is how a fresh copy gets a right-click entry before it has
 	// ever been run: the .cmd next to it calls this.
@@ -36,6 +40,12 @@ func main() {
 	})
 
 	mygo.App.WhenReady(func() {
+		if startHidden {
+			workspace.mu.Lock()
+			workspace.startHidden = true
+			workspace.mu.Unlock()
+		}
+		repairAutostart()
 		startTray()
 
 		// A single exe is run without an installer, so it registers its own
@@ -54,12 +64,27 @@ func main() {
 		} else if !restoreSession() {
 			workspace.createStartupWindow()
 		}
+		// Only the windows this launch restored start hidden; ones made
+		// later (a tray "open", a tab dragged out) are visible.
+		workspace.mu.Lock()
+		workspace.startHidden = false
+		workspace.mu.Unlock()
 		go watchExternal()
 	})
 
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// hasArg reports whether args holds name, without regard to case.
+func hasArg(args []string, name string) bool {
+	for _, arg := range args {
+		if strings.EqualFold(arg, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleShellArgs runs the windowless registry commands, and reports whether
