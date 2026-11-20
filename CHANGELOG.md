@@ -19,6 +19,8 @@
 - 每个标签保留自己的 EditorState：切标签不丢撤销历史与选区
 - 预览在停止输入 120ms 后更新，长文档输入不再每个键都重排整篇
 - 200KB 以上的文档在分栏渲染时显示「正在渲染预览…」
+- Markdown 解析、代码高亮、KaTeX 移入 Web Worker：主包 1.02MB → 554KB，
+  主线程只做 DOMPurify；Worker 启动失败会自动回退主线程
 - 启动时先画静态启动壳，WebView2 冷启动期间不再白屏
 - 状态栏切换换行符（CRLF / LF / CR）与编码（UTF-8 / UTF-8 BOM / GBK / UTF-16 LE/BE）；
   切换后立即落盘，转换失败会回滚并提示

@@ -29,7 +29,7 @@ verify = ["npm run typecheck", "npm test", "npm run build:web"]
 [[agents]]
 id = "preview"
 name = "Markdown 渲染管线"
-scope = ["src/lib/markdown.ts", "src/lib/highlight.ts", "src/lib/exportHtml.ts"]
+scope = ["src/lib/markdown.ts", "src/lib/markdownCore.ts", "src/lib/markdown.worker.ts", "src/lib/sanitize.ts", "src/lib/useRenderedMarkdown.ts", "src/lib/highlight.ts", "src/lib/exportHtml.ts"]
 responsibilities = ["GFM/脚注/Front Matter/KaTeX/Mermaid", "DOMPurify 白名单", "代码高亮语言集", "自包含 HTML 导出"]
 must_not_modify = ["workspace.go", "src/components/TabBar.tsx"]
 verify = ["npm test", "导出 HTML 后无本地引用"]

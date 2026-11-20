@@ -22,6 +22,8 @@ Windows 上的 Markdown 阅读器兼编辑器。Go + MyGo（WebView2），单 ex
 - **外部修改检测**：别的程序改了同一个文件会提示「重新载入 / 保留我的」，不会静默覆盖
 - **会话恢复**：重启后窗口位置、标签、光标、滚动位置全部回来
 - **格式全支持**：GFM（表格、任务列表、删除线、自动链接）、脚注、Front Matter、KaTeX 公式、Mermaid 图表（点击才渲染）、裸 HTML（DOMPurify 白名单过滤）、相对路径图片
+- **不阻塞输入**：Markdown 解析、代码高亮与 KaTeX 在 Web Worker 里跑，主线程只做 DOMPurify；
+  Worker 不可用时自动回退主线程
 - **粘贴/拖入图片**：自动存到文档旁的 `assets/`，插入 Markdown 链接
 - **大纲**：`Ctrl+Shift+O` 开关，随滚动高亮，点击同时定位编辑器光标
 - **快速打开** `Ctrl+P` 与**命令面板** `Ctrl+Shift+P`
@@ -116,7 +118,7 @@ session.go       %AppData%\MDReader\session.json 的写入与恢复
 shell_windows.go 免安装注册：HKCU 里的「打开方式」与 .md 右键项
 src/App.tsx      三态、快捷键、滚动联动、大纲、命令面板
 src/components/  Editor(CM6) / Preview(markdown-it) / TabBar / Outline / Palette / TitleBar / StatusBar / EmptyState
-src/lib/         markdown 管线、highlight、exportHtml、useWorkspace、paths
+src/lib/         markdown 管线（core + worker + sanitize）、highlight、exportHtml、useWorkspace、paths
 fixtures/        all-features.md 回归用例（故意是 BOM + CRLF）
 files_test.go    Go 回归：字节保真、历史快照、会话、图片落盘
 shell_test.go    Go 回归：右键项的写入/撤销/修复（用临时注册表键）

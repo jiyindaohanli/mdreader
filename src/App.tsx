@@ -9,7 +9,7 @@ import { StatusBar, type CursorInfo } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { TitleBar } from "./components/TitleBar";
 import { buildExportHTML, exportableBody } from "./lib/exportHtml";
-import { renderMarkdown, type Rendered } from "./lib/markdown";
+import { useRenderedMarkdown } from "./lib/useRenderedMarkdown";
 import { baseName, folderName } from "./lib/paths";
 import { useWorkspace } from "./lib/useWorkspace";
 import { Workspace, type ShellStatus } from "./mygo";
@@ -57,9 +57,8 @@ export default function App() {
     return Number.isFinite(saved) && saved >= 10 && saved <= 28 ? saved : 13.5;
   });
   const [overwrite, setOverwrite] = useState(false);
-  const [heavySnapshot, setHeavySnapshot] = useState<{ rendered: Rendered; ms: number } | null>(null);
   const [previewSource, setPreviewSource] = useState(ws.buffer);
-  const [renderingPreview, setRenderingPreview] = useState(false);
+  const [heavyRequested, setHeavyRequested] = useState(false);
 
   const editor = useRef<EditorHandle>(null);
   const preview = useRef<PreviewHandle>(null);
@@ -70,8 +69,6 @@ export default function App() {
 
   const theme: "light" | "dark" = manualTheme ?? (systemDark ? "dark" : "light");
   const size = ws.active?.size ?? 0;
-  const sizeRef = useRef(size);
-  sizeRef.current = size;
   const heavy = size > HEAVY_BYTES;
   const tooLarge = size > RENDER_LIMIT;
   // Rendering the whole document on every keystroke is what makes a long file
@@ -81,33 +78,27 @@ export default function App() {
   useEffect(() => {
     const switched = previewDoc.current !== activeId;
     previewDoc.current = activeId;
-    if (switched || mode === "read" || heavy) {
+    if (switched || mode === "read" || (heavy && !heavyRequested)) {
       setPreviewSource(ws.buffer);
-      setRenderingPreview(false);
       return;
     }
-    setRenderingPreview(mode === "split" && sizeRef.current > LARGE_PREVIEW);
     const timer = setTimeout(() => setPreviewSource(ws.buffer), 120);
     return () => clearTimeout(timer);
-  }, [ws.buffer, activeId, mode, heavy]);
+  }, [ws.buffer, activeId, mode, heavy, heavyRequested]);
 
-  // The source catches up once the blocking render has committed.
-  useEffect(() => {
-    if (previewSource === ws.buffer) setRenderingPreview(false);
-  }, [previewSource, ws.buffer]);
-
-  const rendered = useMemo(() => (heavy ? null : renderMarkdown(previewSource)), [heavy, previewSource]);
-  const shown = heavy ? (heavySnapshot?.rendered ?? null) : rendered;
+  // Parsing, highlighting and KaTeX run in a worker; only the sanitize step
+  // touches this thread. The preview stays put while a new render is pending.
+  const canRender = !tooLarge && (!heavy || heavyRequested);
+  const previewRender = useRenderedMarkdown(previewSource, canRender, activeId ?? "");
+  const shown = previewRender.forId === activeId ? previewRender.rendered : null;
 
   useEffect(() => {
-    setHeavySnapshot(null);
+    setHeavyRequested(false);
     if ((latest.current.active?.size ?? 0) > RENDER_LIMIT) setMode("edit");
   }, [activeId]);
 
   const renderNow = useCallback(() => {
-    const started = performance.now();
-    const result = renderMarkdown(latest.current.buffer);
-    setHeavySnapshot({ rendered: result, ms: Math.round(performance.now() - started) });
+    setHeavyRequested(true);
   }, []);
 
   const exportHtml = useCallback(async () => {
@@ -761,7 +752,7 @@ export default function App() {
                 handle={preview}
                 onScroll={syncFromPreview}
               />
-            ) : (
+            ) : previewRender.pending ? null : (
               <div className="preview">
                 <div className="preview__inner">
                   <div className="heavy">
@@ -769,7 +760,7 @@ export default function App() {
                       这个文件有 {((ws.active.size ?? 0) / 1048576).toFixed(1)} MB，
                       {tooLarge ? "预览渲染会占用上 GB 内存，所以不渲染，请用编辑模式查看。" : "实时预览会让输入变卡，所以默认关掉了。"}
                     </p>
-                    {heavySnapshot && <p className="heavy__done">上次渲染耗时 {heavySnapshot.ms} ms</p>}
+                    {previewRender.error && <p className="heavy__done">预览渲染失败：{previewRender.error}</p>}
                     {tooLarge ? (
                       <button type="button" onClick={() => setMode("edit")}>
                         切到编辑模式
@@ -783,7 +774,9 @@ export default function App() {
                 </div>
               </div>
             )}
-            {renderingPreview && <div className="preview__rendering">正在渲染预览…</div>}
+            {previewRender.pending && size > LARGE_PREVIEW && (
+              <div className="preview__rendering">正在渲染预览…</div>
+            )}
             {ws.dropTarget && <div className="dropzone">松开，标签会加入这个窗口</div>}
           </div>
           {showOutline && <Outline toc={shown?.toc ?? []} activeId={activeHeading} onJump={jump} />}
