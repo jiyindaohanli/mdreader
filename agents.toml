@@ -1,0 +1,43 @@
+schema_version = 1
+project = "mdreader"
+description = "Windows Markdown 阅读器/编辑器（Go + MyGo/Wails 之外的 WebView2 shell）。改窗口与标签模型前先读 workspace.go 的状态机。"
+
+[[agents]]
+id = "shell"
+name = "Go 外壳与系统集成"
+scope = ["main.go", "workspace.go", "session.go", "mygo.config.ts"]
+responsibilities = ["窗口与标签状态机", "单实例与文件关联", "会话恢复", "拖拽命中测试", "大文件上限"]
+must_not_modify = ["src/components", "src/lib"]
+verify = ["go build ./...", "go vet ./..."]
+
+[[agents]]
+id = "files"
+name = "文件读写与保真"
+scope = ["files.go"]
+responsibilities = ["BOM / CRLF 保真", ".mdr-history 快照轮转", "未命名文件落盘", "图片写入 assets", "错误信息可读"]
+must_not_modify = ["src/components"]
+verify = ["go build ./...", "打开 fixtures/all-features.md 保存后核对字节"]
+
+[[agents]]
+id = "frontend"
+name = "前端界面"
+scope = ["src/App.tsx", "src/components", "src/theme.css"]
+responsibilities = ["三态布局", "标签栏交互", "苹果风主题（纯色，禁半透明）", "快捷键", "大纲与命令面板"]
+must_not_modify = ["src/mygo.ts", "workspace.go"]
+verify = ["npx tsc --noEmit", "npm run build:web"]
+
+[[agents]]
+id = "preview"
+name = "Markdown 渲染管线"
+scope = ["src/lib/markdown.ts", "src/lib/highlight.ts", "src/lib/exportHtml.ts"]
+responsibilities = ["GFM/脚注/Front Matter/KaTeX/Mermaid", "DOMPurify 白名单", "代码高亮语言集", "自包含 HTML 导出"]
+must_not_modify = ["workspace.go", "src/components/TabBar.tsx"]
+verify = ["fixtures/all-features.md 逐项渲染正确", "导出 HTML 后无本地引用"]
+
+[[agents]]
+id = "qa"
+name = "回归与性能"
+scope = ["fixtures"]
+responsibilities = ["全格式回归用例", "大文件阈值验证（1MB 降级 / 3MB 不渲染 / 10MB 拒绝）", "崩溃恢复与只读文件行为"]
+mode = "review"
+verify = ["node fixtures/make-large.mjs", "杀进程后重启检查会话恢复"]

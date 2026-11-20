@@ -1,0 +1,49 @@
+{
+  "name": "mdreader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "mygo dev",
+    "dev:ios": "mygo dev -platform ios",
+    "dev:android": "mygo dev -platform android",
+    "build": "mygo build",
+    "generate": "mygo generate",
+    "dev:web": "vite",
+    "build:web": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@fontsource/inter": "^5.3.0",
+    "@lezer/highlight": "^1.2.5",
+    "@vscode/markdown-it-katex": "^1.1.2",
+    "dompurify": "^3.4.18",
+    "highlight.js": "^11.12.0",
+    "katex": "^0.19.1",
+    "markdown-it": "^15.0.3",
+    "markdown-it-anchor": "^10.1.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-front-matter": "^0.2.4",
+    "markdown-it-task-lists": "^2.1.1",
+    "mermaid": "^12.3.0",
+    "mygo-runtime": "^0.10.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "mygo-cli": "^0.10.0",
+    "typescript": "^7",
+    "vite": "^8"
+  }
+}

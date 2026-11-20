@@ -1,0 +1,7 @@
+# 代码与文档统一 LF；回归用例必须保持原始字节（BOM + CRLF），所以标为 -text
+* text=auto eol=lf
+fixtures/all-features.md -text
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
