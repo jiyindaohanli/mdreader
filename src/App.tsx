@@ -54,6 +54,7 @@ export default function App() {
   });
   const [overwrite, setOverwrite] = useState(false);
   const [heavySnapshot, setHeavySnapshot] = useState<{ rendered: Rendered; ms: number } | null>(null);
+  const [previewSource, setPreviewSource] = useState(ws.buffer);
 
   const editor = useRef<EditorHandle>(null);
   const preview = useRef<PreviewHandle>(null);
@@ -66,7 +67,22 @@ export default function App() {
   const size = ws.active?.size ?? 0;
   const heavy = size > HEAVY_BYTES;
   const tooLarge = size > RENDER_LIMIT;
-  const rendered = useMemo(() => (heavy ? null : renderMarkdown(ws.buffer)), [heavy, ws.buffer]);
+  // Rendering the whole document on every keystroke is what makes a long file
+  // feel stuck. Render what was typed once the typing pauses; a document
+  // switch or the read view renders at once.
+  const previewDoc = useRef(activeId);
+  useEffect(() => {
+    const switched = previewDoc.current !== activeId;
+    previewDoc.current = activeId;
+    if (switched || mode === "read" || heavy) {
+      setPreviewSource(ws.buffer);
+      return;
+    }
+    const timer = setTimeout(() => setPreviewSource(ws.buffer), 120);
+    return () => clearTimeout(timer);
+  }, [ws.buffer, activeId, mode, heavy]);
+
+  const rendered = useMemo(() => (heavy ? null : renderMarkdown(previewSource)), [heavy, previewSource]);
   const shown = heavy ? (heavySnapshot?.rendered ?? null) : rendered;
 
   useEffect(() => {
