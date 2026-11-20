@@ -29,6 +29,9 @@ const HEAVY_BYTES = 1_000_000;
 /* A 5 MB document renders into half a million elements and eats a gigabyte of
    memory: past this the preview stays off for good. */
 const RENDER_LIMIT = 3_000_000;
+/* Above this, a split view shows "正在渲染预览…" while the pause's render runs:
+   it is still synchronous, but the freeze is explained instead of silent. */
+const LARGE_PREVIEW = 200_000;
 const READING_SIZES = [13, 14, 15, 16, 17, 18, 20, 22];
 
 export default function App() {
@@ -56,6 +59,7 @@ export default function App() {
   const [overwrite, setOverwrite] = useState(false);
   const [heavySnapshot, setHeavySnapshot] = useState<{ rendered: Rendered; ms: number } | null>(null);
   const [previewSource, setPreviewSource] = useState(ws.buffer);
+  const [renderingPreview, setRenderingPreview] = useState(false);
 
   const editor = useRef<EditorHandle>(null);
   const preview = useRef<PreviewHandle>(null);
@@ -66,6 +70,8 @@ export default function App() {
 
   const theme: "light" | "dark" = manualTheme ?? (systemDark ? "dark" : "light");
   const size = ws.active?.size ?? 0;
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   const heavy = size > HEAVY_BYTES;
   const tooLarge = size > RENDER_LIMIT;
   // Rendering the whole document on every keystroke is what makes a long file
@@ -77,11 +83,18 @@ export default function App() {
     previewDoc.current = activeId;
     if (switched || mode === "read" || heavy) {
       setPreviewSource(ws.buffer);
+      setRenderingPreview(false);
       return;
     }
+    setRenderingPreview(mode === "split" && sizeRef.current > LARGE_PREVIEW);
     const timer = setTimeout(() => setPreviewSource(ws.buffer), 120);
     return () => clearTimeout(timer);
   }, [ws.buffer, activeId, mode, heavy]);
+
+  // The source catches up once the blocking render has committed.
+  useEffect(() => {
+    if (previewSource === ws.buffer) setRenderingPreview(false);
+  }, [previewSource, ws.buffer]);
 
   const rendered = useMemo(() => (heavy ? null : renderMarkdown(previewSource)), [heavy, previewSource]);
   const shown = heavy ? (heavySnapshot?.rendered ?? null) : rendered;
@@ -721,7 +734,8 @@ export default function App() {
         <div className="panes" data-mode={mode}>
           <div className="pane pane--editor" style={mode === "split" ? { width: `${ratio * 100}%` } : undefined}>
             <Editor
-              key={ws.active.id}
+              docId={ws.active.id}
+              docIds={ws.docs.map((doc) => doc.id)}
               value={ws.buffer}
               docPath={ws.active.path}
               theme={theme}
@@ -769,6 +783,7 @@ export default function App() {
                 </div>
               </div>
             )}
+            {renderingPreview && <div className="preview__rendering">正在渲染预览…</div>}
             {ws.dropTarget && <div className="dropzone">松开，标签会加入这个窗口</div>}
           </div>
           {showOutline && <Outline toc={shown?.toc ?? []} activeId={activeHeading} onJump={jump} />}

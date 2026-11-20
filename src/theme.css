@@ -527,6 +527,7 @@ button {
   .outline,
   .notice,
   .dropzone,
+  .preview__rendering,
   .statusbar,
   .splitter {
     display: none !important;
@@ -934,6 +935,7 @@ button {
 }
 
 .pane--preview {
+  position: relative;
   flex: 1 1 auto;
 }
 
@@ -1561,4 +1563,23 @@ button {
   width: 14px;
   margin-right: 6px;
   color: var(--accent);
+}
+
+
+/* ---------- 大文档预览提示 ---------- */
+
+.preview__rendering {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--text-2);
+  font-size: 12px;
+  pointer-events: none;
 }

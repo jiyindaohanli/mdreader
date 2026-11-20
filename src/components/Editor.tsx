@@ -13,7 +13,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, type Ref } from "react";
 import { Workspace } from "../mygo";
 
 export interface EditorHandle {
@@ -30,6 +30,8 @@ export interface EditorHandle {
 }
 
 interface Props {
+  docId: string;
+  docIds: string[];
   value: string;
   docPath: string;
   onChange(value: string): void;
@@ -86,7 +88,7 @@ const PHRASES = EditorState.phrases.of({
   "replaced $ matches": "已替换 $ 处",
 });
 
-export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, wrap, overwrite, fontSize, handle }: Props) {
+export function Editor({ docId, docIds, value, docPath, onChange, onCursor, onScroll, theme, wrap, overwrite, fontSize, handle }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const overwriteMode = useRef(overwrite);
@@ -100,63 +102,78 @@ export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, wr
   const path = useRef(docPath);
   path.current = docPath;
 
-  useEffect(() => {
-    const state = EditorState.create({
-      doc: value,
-      extensions: [
-        history(),
-        drawSelection(),
-        highlightActiveLine(),
-        highlightActiveLineGutter(),
-        lineNumbers(),
-        highlightSelectionMatches(),
-        search({ top: true }),
-        wrapConfig.of(wrap ? EditorView.lineWrapping : []),
-        indentUnit.of("  "),
-        markdown({ base: markdownLanguage, codeLanguages: languages }),
-        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
-        PHRASES,
-        themeConfig.of([syntaxHighlighting(highlightStyle(theme))]),
-        EditorView.domEventHandlers({
-          paste: (event, instance) => {
-            const files = imageFiles(event.clipboardData);
-            if (!files.length) return false;
-            event.preventDefault();
-            void insertImages(instance, files, path.current);
-            return true;
-          },
-          drop: (event, instance) => {
-            const files = imageFiles(event.dataTransfer);
-            if (!files.length) return false;
-            event.preventDefault();
-            void insertImages(instance, files, path.current);
-            return true;
-          },
-        }),
-        // Overwrite mode replaces the character after the caret, as Notepad++
-        // does. Only plain ASCII typing is intercepted: an IME composition
-        // and a paste must insert normally.
-        EditorView.inputHandler.of((instance, from, to, text) => {
-          if (!overwriteMode.current || from !== to || text.length !== 1) return false;
-          const code = text.charCodeAt(0);
-          if (code < 0x20 || code > 0x7e) return false;
-          const line = instance.state.doc.lineAt(from);
-          if (from >= line.to) return false;
-          const behind = line.text.charCodeAt(from - line.from);
-          if (behind >= 0xd800 && behind <= 0xdfff) return false;
-          instance.dispatch({
-            changes: { from, to: from + 1, insert: text },
-            selection: { anchor: from + 1 },
-            scrollIntoView: true,
-          });
+  const extensions = useMemo(
+    () => [
+      history(),
+      drawSelection(),
+      highlightActiveLine(),
+      highlightActiveLineGutter(),
+      lineNumbers(),
+      highlightSelectionMatches(),
+      search({ top: true }),
+      wrapConfig.of(wrap ? EditorView.lineWrapping : []),
+      indentUnit.of("  "),
+      markdown({ base: markdownLanguage, codeLanguages: languages }),
+      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+      PHRASES,
+      themeConfig.of([syntaxHighlighting(highlightStyle(theme))]),
+      EditorView.domEventHandlers({
+        paste: (event, instance) => {
+          const files = imageFiles(event.clipboardData);
+          if (!files.length) return false;
+          event.preventDefault();
+          void insertImages(instance, files, path.current);
           return true;
-        }),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) emit.current(update.state.doc.toString());
-          if (update.selectionSet) cursorMoved.current?.();
-        }),
-      ],
-    });
+        },
+        drop: (event, instance) => {
+          const files = imageFiles(event.dataTransfer);
+          if (!files.length) return false;
+          event.preventDefault();
+          void insertImages(instance, files, path.current);
+          return true;
+        },
+      }),
+      // Overwrite mode replaces the character after the caret, as Notepad++
+      // does. Only plain ASCII typing is intercepted: an IME composition
+      // and a paste must insert normally.
+      EditorView.inputHandler.of((instance, from, to, text) => {
+        if (!overwriteMode.current || from !== to || text.length !== 1) return false;
+        const code = text.charCodeAt(0);
+        if (code < 0x20 || code > 0x7e) return false;
+        const line = instance.state.doc.lineAt(from);
+        if (from >= line.to) return false;
+        const behind = line.text.charCodeAt(from - line.from);
+        if (behind >= 0xd800 && behind <= 0xdfff) return false;
+        instance.dispatch({
+          changes: { from, to: from + 1, insert: text },
+          selection: { anchor: from + 1 },
+          scrollIntoView: true,
+        });
+        return true;
+      }),
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) emit.current(update.state.doc.toString());
+        if (update.selectionSet) cursorMoved.current?.();
+      }),
+    ],
+    // The theme and wrap start here and are reconfigured by the effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const makeState = useCallback(
+    (text: string) => EditorState.create({ doc: text, extensions }),
+    [extensions],
+  );
+
+  // Each tab keeps its own EditorState: undo history, selection and folded
+  // ranges survive switching, and the view is not rebuilt per tab.
+  const states = useRef(new Map<string, EditorState>());
+  const activeDoc = useRef(docId);
+
+  useEffect(() => {
+    const state = makeState(value);
+    states.current.set(docId, state);
     const instance = new EditorView({ state, parent: host.current! });
     view.current = instance;
     const onScrollEvent = () => scrolled.current?.();
@@ -166,16 +183,41 @@ export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, wr
       instance.destroy();
       view.current = null;
     };
-    // The editor is created once per document: see the key in App.
+    // The view is created once; documents are swapped into it below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Text changed outside the editor, e.g. the file was reloaded.
   useEffect(() => {
     const instance = view.current;
-    if (!instance || instance.state.doc.toString() === value) return;
-    instance.dispatch({ changes: { from: 0, to: instance.state.doc.length, insert: value } });
-  }, [value]);
+    if (!instance) return;
+    if (docId === activeDoc.current) {
+      // Text changed outside the editor, e.g. the file was reloaded.
+      if (instance.state.doc.toString() !== value) {
+        instance.dispatch({ changes: { from: 0, to: instance.state.doc.length, insert: value } });
+      }
+      return;
+    }
+    states.current.set(activeDoc.current, instance.state);
+    activeDoc.current = docId;
+    const existing = states.current.get(docId);
+    const next = existing ?? makeState(value);
+    if (!existing) states.current.set(docId, next);
+    instance.setState(next);
+    if (next.doc.toString() !== value) {
+      instance.dispatch({ changes: { from: 0, to: instance.state.doc.length, insert: value } });
+    }
+    instance.dispatch({
+      effects: EditorView.scrollIntoView(instance.state.selection.main.head, { y: "nearest" }),
+    });
+  }, [docId, value, makeState]);
+
+  // A closed tab's state goes with it.
+  useEffect(() => {
+    const open = new Set(docIds);
+    for (const id of [...states.current.keys()]) {
+      if (!open.has(id)) states.current.delete(id);
+    }
+  }, [docIds]);
 
   useEffect(() => {
     view.current?.dispatch({
@@ -220,7 +262,10 @@ export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, wr
         const instance = view.current;
         if (!instance) return;
         const at = Math.max(0, Math.min(position, instance.state.doc.length));
-        instance.dispatch({ selection: { anchor: at } });
+        instance.dispatch({
+          selection: { anchor: at },
+          effects: EditorView.scrollIntoView(at, { y: "nearest" }),
+        });
       },
       setCursorLine: (line) => {
         const instance = view.current;
