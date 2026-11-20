@@ -1,0 +1,73 @@
+name: Release
+
+# A pushed v* tag builds the portable exe and attaches it to a GitHub
+# Release, which is where the download links on the repo's right side come
+# from. The GitHub token of the run creates the release; no certificate or
+# secret is needed for an unsigned build.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The release notes come from CHANGELOG.md, so the job needs the file
+          # at the tag, not the whole history.
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Verify
+        run: npm run verify
+
+      - name: Build the portable app
+        run: npx mygo build -skip-installer
+
+      - name: Pack the release zip
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $stage = "build/MDReader-$version"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item "build/windows-amd64/MDReader.exe" $stage
+          Copy-Item "build/windows-amd64/*.cmd" $stage
+          Copy-Item "LICENSE", "README.md", "resources/ICON-LICENSE.md" $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "build/MDReader-$version.zip" -Force
+
+      - name: Write the release notes from the changelog
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $changelog = Get-Content "CHANGELOG.md" -Raw
+          $pattern = "(?ms)^## " + [regex]::Escape($version) + "\b.*?(?=^## |\z)"
+          $notes = [regex]::Match($changelog, $pattern).Value.Trim()
+          if (-not $notes) { $notes = "MDReader $version" }
+          Set-Content -Path "build/release-notes.md" -Value $notes -Encoding utf8
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MDReader ${{ github.ref_name }}
+          body_path: build/release-notes.md
+          files: |
+            build/windows-amd64/MDReader.exe
+            build/MDReader-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

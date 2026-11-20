@@ -3,7 +3,7 @@ import { defineConfig } from "mygo-cli";
 export default defineConfig({
   name: "MDReader",
   identifier: "cn.evegood.mdreader",
-  version: "0.1.0",
+  version: "1.0.0",
   copyright: "© 2026 fivenull",
   // `mygo dev` runs devCommand and loads devUrl; `mygo build` runs
   // buildCommand and embeds frontendDist into the app.
