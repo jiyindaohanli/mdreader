@@ -5,12 +5,14 @@ import { EmptyState } from "./components/EmptyState";
 import { Outline } from "./components/Outline";
 import { Palette, type PaletteItem } from "./components/Palette";
 import { Preview, type PreviewHandle } from "./components/Preview";
+import { StatusBar, type CursorInfo } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { TitleBar } from "./components/TitleBar";
 import { buildExportHTML, exportableBody } from "./lib/exportHtml";
 import { renderMarkdown, type Rendered } from "./lib/markdown";
 import { baseName, folderName } from "./lib/paths";
 import { useWorkspace } from "./lib/useWorkspace";
+import { Workspace, type ShellStatus } from "./mygo";
 
 type Mode = "read" | "split" | "edit";
 
@@ -39,8 +41,17 @@ export default function App() {
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [palette, setPalette] = useState<null | "files" | "commands">(null);
   const [recent, setRecent] = useState<string[]>([]);
+  const [shell, setShell] = useState<ShellStatus | null>(null);
+  const [shellNotice, setShellNotice] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [topLine, setTopLine] = useState(1);
+  const [cursor, setCursor] = useState<CursorInfo>({ line: 1, column: 1, selected: 0, lines: 1 });
+  const [wrap, setWrap] = useState(() => window.localStorage.getItem("mdreader:wrap") !== "0");
+  const [editorSize, setEditorSize] = useState(() => {
+    const saved = Number(window.localStorage.getItem("mdreader:editor-size"));
+    return Number.isFinite(saved) && saved >= 10 && saved <= 28 ? saved : 13.5;
+  });
+  const [overwrite, setOverwrite] = useState(false);
   const [heavySnapshot, setHeavySnapshot] = useState<{ rendered: Rendered; ms: number } | null>(null);
 
   const editor = useRef<EditorHandle>(null);
@@ -96,7 +107,22 @@ export default function App() {
     void currentWindow.setTitle(title);
   }, [ws.active]);
 
+  // Whether this exe is in Explorer's "Open with" list and .md context menu.
+  useEffect(() => {
+    void Workspace.shellStatus()
+      .then(setShell)
+      .catch(() => setShell(null));
+  }, []);
+
   // Where the reader was in the document that comes back.
+  const remember = useCallback(() => {
+    const id = latest.current.active?.id;
+    if (!id) return;
+    const info = editor.current?.cursorInfo();
+    if (info) setCursor(info);
+    latest.current.rememberView(id, editor.current?.cursor() ?? 0, preview.current?.scrollRatio() ?? 0);
+  }, []);
+
   useEffect(() => {
     if (!activeId || !ws.loaded) return;
     const saved = ws.active ? { cursor: ws.active.cursor, scroll: ws.active.scroll } : { cursor: 0, scroll: 0 };
@@ -104,14 +130,22 @@ export default function App() {
       preview.current?.scrollToRatio(saved.scroll || 0);
       editor.current?.setCursor(saved.cursor);
       setTopLine(preview.current?.topLine() ?? 1);
+      remember();
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeId, ws.loaded]);
+  }, [activeId, ws.loaded, remember]);
 
-  const remember = useCallback(() => {
-    const id = latest.current.active?.id;
-    if (!id) return;
-    latest.current.rememberView(id, editor.current?.cursor() ?? 0, preview.current?.scrollRatio() ?? 0);
+  const toggleWrap = useCallback(() => {
+    setWrap((on) => {
+      const next = !on;
+      window.localStorage.setItem("mdreader:wrap", next ? "1" : "0");
+      return next;
+    });
+  }, []);
+
+  const changeEditorSize = useCallback((size: number) => {
+    setEditorSize(size);
+    window.localStorage.setItem("mdreader:editor-size", String(size));
   }, []);
 
   // The editor and the preview follow each other in the split view.
@@ -152,6 +186,23 @@ export default function App() {
     setPalette(mode);
     if (mode === "files") void latest.current.recent().then(setRecent);
   }, []);
+
+  // Adds the exe to Explorer's "Open with" and the .md context menu, or
+  // takes it out again. The registration is per user, in HKCU.
+  const toggleShell = useCallback(async () => {
+    if (!shell?.supported) return;
+    try {
+      const next = shell.registered ? await Workspace.unregisterShell() : await Workspace.registerShell();
+      setShell(next);
+      setShellNotice(
+        next.registered
+          ? "已加入右键菜单：右键 .md → 打开方式 → MDReader；Windows 11 的「显示更多选项」里还有「用 MDReader 打开」"
+          : "已取消右键菜单注册，下次启动也不会自动加回",
+      );
+    } catch (error) {
+      setShellNotice(`右键菜单设置失败：${String(error)}`);
+    }
+  }, [shell]);
 
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const items: PaletteItem[] = ws.docs.map((doc) => ({
@@ -206,10 +257,15 @@ export default function App() {
         },
       },
       { key: "cmd-default", label: "设为默认 .md 程序", run: () => latest.current.setDefaultApp() },
+      {
+        key: "cmd-shell",
+        label: shell?.registered ? "取消右键打开（.md）" : "加入右键打开（.md）",
+        run: () => void toggleShell(),
+      },
       { key: "cmd-export", label: "导出为 HTML…", run: () => void exportHtml() },
       { key: "cmd-print", label: "打印 / 另存为 PDF", run: () => window.print() },
     ];
-  }, [theme, exportHtml]);
+  }, [theme, exportHtml, shell, toggleShell]);
 
   const cycleMode = useCallback(() => {
     setMode((current) => MODES[(MODES.findIndex((item) => item.id === current) + 1) % MODES.length]!.id);
@@ -239,6 +295,11 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Insert") {
+        event.preventDefault();
+        setOverwrite((on) => !on);
+        return;
+      }
       if (!event.ctrlKey || event.altKey) return;
       const key = event.key.toLowerCase();
       if (key === "tab") {
@@ -479,6 +540,15 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
+                  void toggleShell();
+                }}
+              >
+                {shell?.registered ? "取消右键打开（.md）" : "加入右键打开（.md）"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
                   ws.setDefaultApp();
                 }}
               >
@@ -538,6 +608,15 @@ export default function App() {
         />
       )}
 
+      {shellNotice && (
+        <div className="notice">
+          <span>{shellNotice}</span>
+          <button type="button" className="notice__dismiss" onClick={() => setShellNotice(null)}>
+            ×
+          </button>
+        </div>
+      )}
+
       {ws.active && ws.loaded ? (
         <div className="panes" data-mode={mode}>
           <div className="pane pane--editor" style={mode === "split" ? { width: `${ratio * 100}%` } : undefined}>
@@ -546,8 +625,14 @@ export default function App() {
               value={ws.buffer}
               docPath={ws.active.path}
               theme={theme}
+              wrap={wrap}
+              overwrite={overwrite}
+              fontSize={editorSize}
               handle={editor}
-              onChange={ws.edit}
+              onChange={(text) => {
+                ws.edit(text);
+                remember();
+              }}
               onCursor={remember}
               onScroll={syncFromEditor}
             />
@@ -595,6 +680,21 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <StatusBar
+        doc={ws.active}
+        length={ws.buffer.length}
+        cursor={cursor}
+        wrap={wrap}
+        overwrite={overwrite}
+        fontSize={editorSize}
+        onWrap={toggleWrap}
+        onOverwrite={() => setOverwrite((on) => !on)}
+        onFontSize={changeEditorSize}
+        onFormat={(eol, encoding) => {
+          if (ws.active) ws.setFormat(ws.active.id, eol, encoding);
+        }}
+      />
 
       <Palette
         open={palette !== null}

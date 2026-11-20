@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    # The app is Windows-only (WebView2) and so is the code that reads files.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck the frontend
+        run: npm run typecheck
+
+      - name: Frontend regression (markdown, export, paths)
+        run: npm test
+
+      - name: Vet Go
+        run: go vet ./...
+
+      - name: Go regression (bytes, history, session)
+        run: go test ./...
+
+      - name: Compile
+        run: |
+          go build ./...
+          npm run build:web

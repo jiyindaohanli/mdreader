@@ -174,6 +174,26 @@ export function useWorkspace() {
       },
       recent: () => Workspace.recent(),
       setDefaultApp: () => void Workspace.setDefaultApp(),
+      /* Switch line endings or encoding, then write the file at once so the
+         bar reflects what is on disk. */
+      setFormat: (id: string, eol: string, encoding: string) => {
+        const text = buffersRef.current[id] ?? "";
+        const before = state?.docs.find((item) => item.id === id);
+        clearTimeout(timers.current[id]);
+        delete timers.current[id];
+        void (async () => {
+          try {
+            await Workspace.setFormat(id, eol, encoding);
+            await Workspace.save(id, text);
+          } catch (err) {
+            // Put the status bar back to what the file on disk still is.
+            if (before) {
+              await Workspace.setFormat(id, before.eol, before.encoding).catch(() => {});
+            }
+            setNotice({ id, kind: "error", title: "", text: `切换格式失败：${message(err)}` });
+          }
+        })();
+      },
       reveal: (id: string) => void Workspace.reveal(id),
       reload: async (id: string) => {
         const text = await Workspace.reload(id).catch((err) => {

@@ -4,7 +4,14 @@ import { languages } from "@codemirror/language-data";
 import { HighlightStyle, indentUnit, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState } from "@codemirror/state";
-import { drawSelection, EditorView, highlightActiveLine, keymap } from "@codemirror/view";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import { Workspace } from "../mygo";
@@ -18,6 +25,8 @@ export interface EditorHandle {
   setCursor(position: number): void;
   setCursorLine(line: number): void;
   focus(): void;
+  /** Where the caret is, and how much is selected, for the status bar. */
+  cursorInfo(): { line: number; column: number; selected: number; lines: number };
 }
 
 interface Props {
@@ -27,6 +36,9 @@ interface Props {
   onCursor?(): void;
   onScroll?(): void;
   theme: "light" | "dark";
+  wrap: boolean;
+  overwrite: boolean;
+  fontSize: number;
   handle: Ref<EditorHandle>;
 }
 
@@ -53,6 +65,7 @@ function highlightStyle(theme: "light" | "dark"): HighlightStyle {
 }
 
 const themeConfig = new Compartment();
+const wrapConfig = new Compartment();
 
 // The search panel is CodeMirror's: these are its labels in Chinese.
 const PHRASES = EditorState.phrases.of({
@@ -73,9 +86,11 @@ const PHRASES = EditorState.phrases.of({
   "replaced $ matches": "已替换 $ 处",
 });
 
-export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, handle }: Props) {
+export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, wrap, overwrite, fontSize, handle }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
+  const overwriteMode = useRef(overwrite);
+  overwriteMode.current = overwrite;
   const emit = useRef(onChange);
   emit.current = onChange;
   const cursorMoved = useRef(onCursor);
@@ -92,9 +107,11 @@ export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, ha
         history(),
         drawSelection(),
         highlightActiveLine(),
+        highlightActiveLineGutter(),
+        lineNumbers(),
         highlightSelectionMatches(),
         search({ top: true }),
-        EditorView.lineWrapping,
+        wrapConfig.of(wrap ? EditorView.lineWrapping : []),
         indentUnit.of("  "),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
@@ -115,6 +132,24 @@ export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, ha
             void insertImages(instance, files, path.current);
             return true;
           },
+        }),
+        // Overwrite mode replaces the character after the caret, as Notepad++
+        // does. Only plain ASCII typing is intercepted: an IME composition
+        // and a paste must insert normally.
+        EditorView.inputHandler.of((instance, from, to, text) => {
+          if (!overwriteMode.current || from !== to || text.length !== 1) return false;
+          const code = text.charCodeAt(0);
+          if (code < 0x20 || code > 0x7e) return false;
+          const line = instance.state.doc.lineAt(from);
+          if (from >= line.to) return false;
+          const behind = line.text.charCodeAt(from - line.from);
+          if (behind >= 0xd800 && behind <= 0xdfff) return false;
+          instance.dispatch({
+            changes: { from, to: from + 1, insert: text },
+            selection: { anchor: from + 1 },
+            scrollIntoView: true,
+          });
+          return true;
         }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) emit.current(update.state.doc.toString());
@@ -147,6 +182,12 @@ export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, ha
       effects: themeConfig.reconfigure([syntaxHighlighting(highlightStyle(theme))]),
     });
   }, [theme]);
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: wrapConfig.reconfigure(wrap ? EditorView.lineWrapping : []),
+    });
+  }, [wrap]);
 
   useImperativeHandle(
     handle,
@@ -192,11 +233,23 @@ export function Editor({ value, docPath, onChange, onCursor, onScroll, theme, ha
         });
       },
       focus: () => view.current?.focus(),
+      cursorInfo: () => {
+        const state = view.current?.state;
+        if (!state) return { line: 1, column: 1, selected: 0, lines: 1 };
+        const selection = state.selection.main;
+        const line = state.doc.lineAt(selection.head);
+        return {
+          line: line.number,
+          column: selection.head - line.from + 1,
+          selected: Math.abs(selection.to - selection.from),
+          lines: state.doc.lines,
+        };
+      },
     }),
     [handle],
   );
 
-  return <div className="editor" ref={host} />;
+  return <div className="editor" ref={host} style={{ ["--editor-size" as string]: `${fontSize}px` }} />;
 }
 
 function imageFiles(data: DataTransfer | null): File[] {

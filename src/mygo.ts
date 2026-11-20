@@ -13,7 +13,7 @@ export interface Doc {
   path: string;
   title: string;
   eol: string;
-  bom: boolean;
+  encoding: string;
   modTime: number;
   dirty: boolean;
   untitled: boolean;
@@ -22,6 +22,14 @@ export interface Doc {
   missing: boolean;
   external: boolean;
   size: number;
+}
+
+/** ShellStatus is what the page shows about the app's place in Explorer. */
+export interface ShellStatus {
+  supported: boolean;
+  registered: boolean;
+  exePath: string;
+  registeredPath: string;
 }
 
 /** State is everything the pages render, sent whole on every change. */
@@ -110,6 +118,11 @@ export const Workspace = {
   openExternalFiles: bind<[], void>("Workspace.OpenExternalFiles", () => []),
   /** Recent returns the files the app opened lately, newest first. */
   recent: bind<[], string[]>("Workspace.Recent", () => []),
+  /**
+   * RegisterShell adds the running exe to "Open with" and the .md right-click
+   * menu for the current user. No installer and no administrator rights.
+   */
+  registerShell: bind<[], ShellStatus>("Workspace.RegisterShell", () => []),
   /** Reload reads a document again after another program wrote it. */
   reload: bind<[string], string>("Workspace.Reload", (id: string) => [id]),
   /** Reorder stores the order the tab bar left its tabs in. */
@@ -138,10 +151,23 @@ export const Workspace = {
   setDefaultApp: bind<[], void>("Workspace.SetDefaultApp", () => []),
   /** SetDirty tells whether a document has changes the file does not have yet. */
   setDirty: bind<[string, boolean], void>("Workspace.SetDirty", (id: string, dirty: boolean) => [id, dirty]),
+  /**
+   * SetFormat changes the line endings and the encoding the next save writes.
+   * The status bar calls it, then saves at once, so the file on disk matches
+   * what the bar shows.
+   */
+  setFormat: bind<[string, string, string], Doc>("Workspace.SetFormat", (id: string, eol: string, encoding: string) => [id, eol, encoding]),
   /** SetView keeps where the reader was in a document, for the next launch. */
   setView: bind<[string, number, number], void>("Workspace.SetView", (id: string, cursor: number, scroll: number) => [id, cursor, scroll]),
+  /**
+   * ShellStatus reports whether this exe is registered in Explorer's "Open with"
+   * list and the .md context menu.
+   */
+  shellStatus: bind<[], ShellStatus>("Workspace.ShellStatus", () => []),
   /** State returns everything the pages render. */
   state: bind<[], State>("Workspace.State", () => []),
+  /** UnregisterShell undoes RegisterShell, and remembers not to redo it on start. */
+  unregisterShell: bind<[], ShellStatus>("Workspace.UnregisterShell", () => []),
   /** WriteExport writes the HTML the page built, fonts and images included. */
   writeExport: bind<[string, string], string>("Workspace.WriteExport", (path: string, html: string) => [path, html]),
 } as const;

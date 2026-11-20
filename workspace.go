@@ -20,7 +20,7 @@ type Doc struct {
 	Path     string  `json:"path"`
 	Title    string  `json:"title"`
 	EOL      string  `json:"eol"`
-	BOM      bool    `json:"bom"`
+	Encoding string  `json:"encoding"`
 	ModTime  int64   `json:"modTime"`
 	Dirty    bool    `json:"dirty"`
 	Untitled bool    `json:"untitled"`
@@ -514,6 +514,35 @@ func (s *Workspace) SetView(id string, cursor int, scroll float64) error {
 	return nil
 }
 
+// SetFormat changes the line endings and the encoding the next save writes.
+// The status bar calls it, then saves at once, so the file on disk matches
+// what the bar shows.
+func (s *Workspace) SetFormat(id, eol, encoding string) (Doc, error) {
+	switch eol {
+	case "\n", "\r\n", "\r":
+	default:
+		return Doc{}, fmt.Errorf("不支持的换行符")
+	}
+	switch encoding {
+	case encUTF8, encUTF8BOM, encGBK, encUTF16LE, encUTF16BE:
+	default:
+		return Doc{}, fmt.Errorf("不支持的编码: %s", encoding)
+	}
+	s.mu.Lock()
+	doc := s.docs[id]
+	if doc == nil {
+		s.mu.Unlock()
+		return Doc{}, fmt.Errorf("文档不存在")
+	}
+	doc.EOL = eol
+	doc.Encoding = encoding
+	doc.Dirty = true
+	saved := *doc
+	s.mu.Unlock()
+	s.publish()
+	return saved, nil
+}
+
 // Save writes a document's text into its file, in the line endings and encoding
 // it had, after keeping the previous version in .mdr-history.
 func (s *Workspace) Save(id, content string) (Doc, error) {
@@ -523,10 +552,10 @@ func (s *Workspace) Save(id, content string) (Doc, error) {
 		s.mu.Unlock()
 		return Doc{}, fmt.Errorf("文档不存在")
 	}
-	path, eol, bom := doc.Path, doc.EOL, doc.BOM
+	path, eol, encoding := doc.Path, doc.EOL, doc.Encoding
 	s.mu.Unlock()
 
-	modTime, size, err := writeDocument(path, content, eol, bom)
+	modTime, size, err := writeDocument(path, content, eol, encoding)
 	if err != nil {
 		return Doc{}, err
 	}
@@ -570,7 +599,7 @@ func (s *Workspace) SaveAs(win int, id, content string) (Doc, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		os.WriteFile(path, nil, 0o644)
 	}
-	modTime, size, err := writeDocument(path, content, doc.EOL, doc.BOM)
+	modTime, size, err := writeDocument(path, content, doc.EOL, doc.Encoding)
 	if err != nil {
 		return Doc{}, err
 	}
@@ -616,7 +645,7 @@ func (s *Workspace) Reload(id string) (string, error) {
 		doc.External = false
 		doc.Missing = false
 		doc.EOL = file.eol
-		doc.BOM = file.bom
+		doc.Encoding = file.encoding
 	}
 	s.mu.Unlock()
 	s.publish()
@@ -770,13 +799,13 @@ func (s *Workspace) newDocLocked(path string, file document) *Doc {
 	s.nextID++
 	id := fmt.Sprintf("d%d", s.nextID)
 	doc := &Doc{
-		ID:      id,
-		Path:    path,
-		Title:   baseTitle(path),
-		EOL:     file.eol,
-		BOM:     file.bom,
-		ModTime: file.modTime,
-		Size:    file.size,
+		ID:       id,
+		Path:     path,
+		Title:    baseTitle(path),
+		EOL:      file.eol,
+		Encoding: file.encoding,
+		ModTime:  file.modTime,
+		Size:     file.size,
 	}
 	doc.Untitled = isUntitled(path)
 	s.docs[id] = doc

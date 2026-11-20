@@ -2,11 +2,20 @@ package main
 
 import (
 	"log"
+	"os"
+	"strings"
 
 	"github.com/egoist/mygo"
 )
 
 func main() {
+	// `MDReader.exe --register` joins the Explorer menus without opening a
+	// window, which is how a fresh copy gets a right-click entry before it has
+	// ever been run: the .cmd next to it calls this.
+	if handled, code := handleShellArgs(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+
 	// A second launch, from Explorer or the command line, hands its files to
 	// the window that is already open.
 	if !mygo.App.RequestSingleInstanceLock() {
@@ -20,6 +29,13 @@ func main() {
 	mygo.App.OnOpenFile(func(path string) { workspace.queueFile(path) })
 
 	mygo.App.WhenReady(func() {
+		// A single exe is run without an installer, so it registers its own
+		// "Open with" and .md context menu entries on first run. Not while
+		// developing: that would point Explorer at a build in .mygo/.
+		if !mygo.IsDev() {
+			workspace.autoRegisterShell()
+		}
+
 		workspace.mu.Lock()
 		hasFiles := len(workspace.startup) > 0
 		workspace.mu.Unlock()
@@ -35,4 +51,26 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// handleShellArgs runs the windowless registry commands, and reports whether
+// it did: true means main should exit with the code it returns.
+func handleShellArgs(args []string) (handled bool, code int) {
+	for _, arg := range args {
+		switch strings.ToLower(strings.TrimSpace(arg)) {
+		case "--register", "-register", "/register":
+			if _, err := workspace.RegisterShell(); err != nil {
+				log.Printf("注册右键菜单失败: %v", err)
+				return true, 1
+			}
+			return true, 0
+		case "--unregister", "-unregister", "/unregister":
+			if _, err := workspace.UnregisterShell(); err != nil {
+				log.Printf("取消右键菜单失败: %v", err)
+				return true, 1
+			}
+			return true, 0
+		}
+	}
+	return false, 0
 }

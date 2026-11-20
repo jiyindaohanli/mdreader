@@ -5,3 +5,6 @@ fixtures/all-features.md -text
 *.jpg binary
 *.ico binary
 *.exe binary
+
+# double-clicked in Explorer: Windows wants CRLF, and the messages are UTF-8
+*.cmd text eol=crlf

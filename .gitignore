@@ -11,6 +11,14 @@ fixtures/huge-12mb.md
 # per-document snapshots written beside a saved file
 .mdr-history/
 
+# code signing: certificates and their passwords never go in the repo
+certs/
+*.pfx
+*.p12
+
+# vitest
+coverage/
+
 # stray binaries from `go build ./...`
 /*.exe
 /*.dll
