@@ -56,6 +56,9 @@ export default function App() {
   const [topLine, setTopLine] = useState(1);
   const [cursor, setCursor] = useState<CursorInfo>({ line: 1, column: 1, selected: 0, lines: 1 });
   const [wrap, setWrap] = useState(() => window.localStorage.getItem("mdreader:wrap") !== "0");
+  const [followPreview, setFollowPreview] = useState(
+    () => window.localStorage.getItem("mdreader:preview-follow") !== "0",
+  );
   const [editorSize, setEditorSize] = useState(() => {
     const saved = Number(window.localStorage.getItem("mdreader:editor-size"));
     return Number.isFinite(saved) && saved >= 10 && saved <= 28 ? saved : 13.5;
@@ -197,6 +200,14 @@ export default function App() {
     });
   }, []);
 
+  const toggleFollowPreview = useCallback(() => {
+    setFollowPreview((on) => {
+      const next = !on;
+      window.localStorage.setItem("mdreader:preview-follow", next ? "1" : "0");
+      return next;
+    });
+  }, []);
+
   const changeEditorSize = useCallback((size: number) => {
     setEditorSize(size);
     window.localStorage.setItem("mdreader:editor-size", String(size));
@@ -205,12 +216,12 @@ export default function App() {
   // The editor and the preview follow each other in the split view.
   const syncFromEditor = useCallback(() => {
     const now = Date.now();
-    if (now >= syncing.current && mode === "split") {
+    if (now >= syncing.current && mode === "split" && followPreview) {
       syncing.current = now + 70;
       preview.current?.scrollToLine(editor.current?.topLine() ?? 1);
     }
     remember();
-  }, [mode, remember]);
+  }, [mode, remember, followPreview]);
 
   const syncFromPreview = useCallback(() => {
     const line = preview.current?.topLine() ?? 1;
@@ -346,6 +357,11 @@ export default function App() {
         label: startAtLogin ? "开机启动（隐藏到托盘）：开" : "开机启动（隐藏到托盘）：关",
         run: () => void toggleStartAtLogin(),
       },
+      {
+        key: "cmd-follow",
+        label: followPreview ? "预览：跟随编辑器（开）" : "预览：固定（关）",
+        run: toggleFollowPreview,
+      },
       { key: "cmd-quit", label: "退出 MDReader", run: () => void quit() },
       {
         key: "cmd-shell",
@@ -355,7 +371,7 @@ export default function App() {
       { key: "cmd-export", label: "导出为 HTML…", run: () => void exportHtml() },
       { key: "cmd-print", label: "打印 / 另存为 PDF", run: () => window.print() },
     ];
-  }, [theme, exportHtml, shell, toggleShell, closeToTray, toggleCloseToTray, startAtLogin, toggleStartAtLogin, quit]);
+  }, [theme, exportHtml, shell, toggleShell, closeToTray, toggleCloseToTray, startAtLogin, toggleStartAtLogin, quit, followPreview, toggleFollowPreview]);
 
   const cycleMode = useCallback(() => {
     setMode((current) => MODES[(MODES.findIndex((item) => item.id === current) + 1) % MODES.length]!.id);
@@ -663,6 +679,16 @@ export default function App() {
               >
                 <span className="menu__check">{startAtLogin ? "✓" : ""}</span>
                 开机启动（隐藏到托盘）
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  toggleFollowPreview();
+                }}
+              >
+                <span className="menu__check">{followPreview ? "✓" : ""}</span>
+                预览跟随编辑器
               </button>
               <button
                 type="button"
